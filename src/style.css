@@ -66,3 +66,72 @@ main{max-width:1100px;margin:auto;padding:22px}
  .two{grid-template-columns:1fr}
  .modal{padding:15px}
 }
+/* Parts & Labor */
+
+.charge{
+  display:grid;
+  grid-template-columns:1.2fr 2fr .7fr 1fr auto auto;
+  gap:8px;
+  align-items:center;
+  padding:10px 0;
+  border-bottom:1px solid #eee;
+}
+
+.charge input{
+  width:100%;
+  padding:10px;
+  border:1px solid #ccc;
+  border-radius:8px;
+}
+
+.subtotal{
+  text-align:right;
+  font-weight:bold;
+  padding:12px 0;
+}
+
+.totals{
+  background:#f3f4f6;
+  border-radius:12px;
+  padding:14px;
+  margin:10px 0 18px;
+}
+
+.totals div{
+  display:flex;
+  justify-content:space-between;
+  padding:6px 0;
+}
+
+.grandtotal{
+  border-top:2px solid #111827;
+  margin-top:6px;
+  padding-top:12px!important;
+  font-size:20px;
+}
+
+.form hr{
+  width:100%;
+  border:0;
+  border-top:1px solid #ddd;
+  margin:10px 0;
+}
+
+@media(max-width:650px){
+  .charge{
+    grid-template-columns:1fr 1fr;
+    background:#f9fafb;
+    padding:12px;
+    border-radius:10px;
+    margin-bottom:10px;
+  }
+
+  .charge input:nth-child(2){
+    grid-column:1 / -1;
+  }
+
+  .charge b{
+    display:flex;
+    align-items:center;
+  }
+}
