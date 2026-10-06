@@ -135,3 +135,140 @@ main{max-width:1100px;margin:auto;padding:22px}
     align-items:center;
   }
 }
+
+/* New Ticket Intake */
+
+.intakebox{
+  border:1px solid #e5e7eb;
+  background:#f9fafb;
+  border-radius:14px;
+  padding:16px;
+  display:grid;
+  gap:12px;
+}
+
+.intakebox h3{
+  margin:0;
+}
+
+.intakebox h4{
+  margin:4px 0;
+}
+
+.selectedcard{
+  background:white;
+  border:2px solid #2563eb;
+  border-radius:12px;
+  padding:13px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:12px;
+}
+
+.selectedcard b,
+.selectedcard small{
+  display:block;
+}
+
+.selectedcard small{
+  color:#6b7280;
+  margin-top:4px;
+}
+
+.searchresults{
+  display:grid;
+  gap:6px;
+  max-height:260px;
+  overflow:auto;
+}
+
+.searchresult{
+  background:white;
+  color:#111827;
+  border:1px solid #d1d5db;
+  text-align:left;
+  padding:12px;
+}
+
+.searchresult:hover{
+  background:#f3f4f6;
+}
+
+.searchresult b,
+.searchresult span{
+  display:block;
+}
+
+.searchresult span{
+  color:#6b7280;
+  font-size:12px;
+  margin-top:4px;
+}
+
+.inlineform{
+  background:white;
+  border:1px solid #d1d5db;
+  border-radius:12px;
+  padding:14px;
+  display:grid;
+  gap:12px;
+}
+
+.equipmentchoices{
+  display:grid;
+  gap:8px;
+}
+
+.equipmentchoice{
+  background:white;
+  color:#111827;
+  border:1px solid #d1d5db;
+  text-align:left;
+  padding:12px;
+}
+
+.equipmentchoice b,
+.equipmentchoice span{
+  display:block;
+}
+
+.equipmentchoice span{
+  color:#6b7280;
+  font-size:12px;
+  margin-top:4px;
+}
+
+.equipmentchoice.selected{
+  border:2px solid #2563eb;
+  background:#eff6ff;
+}
+
+.savefirst{
+  background:#eff6ff;
+  border:1px solid #bfdbfe;
+  color:#1e40af;
+  border-radius:10px;
+  padding:12px;
+  text-align:center;
+}
+
+@media(max-width:650px){
+
+  .intakebox{
+    padding:12px;
+  }
+
+  .selectedcard{
+    align-items:flex-start;
+  }
+
+  .selectedcard .small{
+    flex-shrink:0;
+  }
+
+  .searchresult,
+  .equipmentchoice{
+    min-height:54px;
+  }
+}
