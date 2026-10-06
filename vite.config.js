@@ -13,7 +13,22 @@ export default defineConfig({
         cleanupOutdatedCaches:true,
         clientsClaim:true,
         skipWaiting:true,
-        navigateFallback:'/index.html'
+        navigateFallback:'/index.html',
+        navigateFallbackDenylist:[/^\\/api\\//],
+        runtimeCaching:[
+          {
+            urlPattern:({request})=>request.mode==='navigate',
+            handler:'NetworkFirst',
+            options:{
+              cacheName:'jeffco-pages',
+              networkTimeoutSeconds:3,
+              expiration:{
+                maxEntries:10,
+                maxAgeSeconds:86400
+              }
+            }
+          }
+        ]
       }
     })
   ],
