@@ -4,8 +4,8 @@ import {createClient} from '@supabase/supabase-js';
 import './style.css';
 
 const sb=createClient(
-  import.meta.env.VITE_SUPABASE_URL,
-  import.meta.env.VITE_SUPABASE_ANON_KEY
+ import.meta.env.VITE_SUPABASE_URL,
+ import.meta.env.VITE_SUPABASE_ANON_KEY
 );
 
 const statuses=[
@@ -44,7 +44,9 @@ const blankTicket={
  work_performed:'',
  technician_notes:'',
  status:'NEW',
- tax_rate:0
+ tax_rate:0,
+ archived:false,
+ archived_at:null
 };
 
 const money=n=>Number(n||0).toLocaleString(
@@ -56,17 +58,13 @@ function App(){
 
  const [session,setSession]=useState(null);
  const [tab,setTab]=useState('Dashboard');
-
  const [customers,setCustomers]=useState([]);
  const [equipment,setEquipment]=useState([]);
  const [tickets,setTickets]=useState([]);
-
  const [loading,setLoading]=useState(true);
  const [q,setQ]=useState('');
-
  const [modal,setModal]=useState(null);
  const [form,setForm]=useState(null);
-
  const [error,setError]=useState('');
  const [notice,setNotice]=useState('');
 
@@ -179,10 +177,8 @@ function App(){
   e.preventDefault();
 
   const r=await sb.auth.signInWithPassword({
-
    email:e.target.email.value,
    password:e.target.password.value
-
   });
 
   if(r.error){
@@ -225,8 +221,31 @@ function App(){
  const filteredEquipment=
   equipment.filter(search);
 
+ const activeTickets=
+  tickets.filter(
+   t=>!t.archived
+  );
+
+ const archivedTickets=
+  tickets.filter(
+   t=>t.archived
+  );
+
  const filteredTickets=
-  tickets.filter(t=>
+  activeTickets.filter(t=>
+   search({
+    ...t,
+    customer:customerName(
+     t.customer_id
+    ),
+    equipment:equipmentName(
+     t.equipment_id
+    )
+   })
+  );
+
+ const filteredArchivedTickets=
+  archivedTickets.filter(t=>
    search({
     ...t,
     customer:customerName(
@@ -271,7 +290,8 @@ function App(){
     'Dashboard',
     'Customers',
     'Equipment',
-    'Tickets'
+    'Tickets',
+    'Filed Tickets'
    ].map(x=>
 
     <button
@@ -353,7 +373,7 @@ function App(){
 
          <b>
           {
-           tickets.filter(
+           activeTickets.filter(
             t=>t.status===s
            ).length
           }
@@ -371,19 +391,15 @@ function App(){
 
        <h3>Recent Tickets</h3>
 
-       {tickets
+       {activeTickets
         .slice(0,8)
         .map(t=>
 
          <TicketRow
           key={t.id}
           t={t}
-          customerName={
-           customerName
-          }
-          equipmentName={
-           equipmentName
-          }
+          customerName={customerName}
+          equipmentName={equipmentName}
           edit={()=>{
            setForm(t);
            setModal('ticket');
@@ -541,9 +557,7 @@ function App(){
            className="small"
            onClick={()=>{
             setForm(x);
-            setModal(
-             'equipment'
-            );
+            setModal('equipment');
            }}
           >
            Edit
@@ -592,17 +606,19 @@ function App(){
 
       <section className="panel">
 
+       {!filteredTickets.length&&
+        <div className="empty">
+         No active tickets found.
+        </div>
+       }
+
        {filteredTickets.map(t=>
 
         <TicketRow
          key={t.id}
          t={t}
-         customerName={
-          customerName
-         }
-         equipmentName={
-          equipmentName
-         }
+         customerName={customerName}
+         equipmentName={equipmentName}
          edit={()=>{
           setForm(t);
           setModal('ticket');
@@ -613,6 +629,56 @@ function App(){
            t.id
           )
          }
+        />
+
+       )}
+
+      </section>
+
+     </>}
+
+     {tab==='Filed Tickets'&&<>
+
+      <div className="top">
+
+       <div>
+
+        <h2>
+         Filed Tickets
+        </h2>
+
+        <p className="muted">
+         Closed repair tickets and service history
+        </p>
+
+       </div>
+
+      </div>
+
+      <Search
+       q={q}
+       setQ={setQ}
+      />
+
+      <section className="panel">
+
+       {!filteredArchivedTickets.length&&
+        <div className="empty">
+         No filed tickets found.
+        </div>
+       }
+
+       {filteredArchivedTickets.map(t=>
+
+        <TicketRow
+         key={t.id}
+         t={t}
+         customerName={customerName}
+         equipmentName={equipmentName}
+         edit={()=>{
+          setForm(t);
+          setModal('ticket');
+         }}
         />
 
        )}
@@ -669,18 +735,13 @@ function App(){
       form={form}
       setForm={setForm}
       customers={customers}
-      setCustomers={
-       setCustomers
-      }
+      setCustomers={setCustomers}
       equipment={equipment}
-      setEquipment={
-       setEquipment
-      }
-      setTickets={
-       setTickets
-      }
+      setEquipment={setEquipment}
+      setTickets={setTickets}
       setError={setError}
       setNotice={setNotice}
+      setModal={setModal}
      />
 
     }
@@ -817,10 +878,23 @@ function TicketRow({
     }
    </small>
 
+   {t.archived&&t.archived_at&&
+    <small>
+     Filed: {
+      new Date(
+       t.archived_at
+      ).toLocaleString()
+     }
+    </small>
+   }
+
   </div>
 
   <span className="badge">
-   {t.status}
+   {t.archived
+    ?'FILED'
+    :t.status
+   }
   </span>
 
   <div className="rowactions">
@@ -996,17 +1070,13 @@ function TicketForm({
  setEquipment,
  setTickets,
  setError,
- setNotice
+ setNotice,
+ setModal
 }){
 
- const [parts,setParts]=
-  useState([]);
-
- const [labor,setLabor]=
-  useState([]);
-
- const [loaded,setLoaded]=
-  useState(false);
+ const [parts,setParts]=useState([]);
+ const [labor,setLabor]=useState([]);
+ const [loaded,setLoaded]=useState(false);
 
  const [
   customerSearch,
@@ -1037,10 +1107,8 @@ function TicketForm({
   ...blankEquipment
  });
 
- const [
-  saving,
-  setSaving
- ]=useState(false);
+ const [saving,setSaving]=
+  useState(false);
 
  useEffect(()=>{
 
@@ -1358,6 +1426,130 @@ function TicketForm({
   );
  }
 
+ async function closeAndFileTicket(){
+
+  if(!form.id){
+   return;
+  }
+
+  if(form.status!=='COMPLETED'){
+
+   alert(
+    'Set the repair status to COMPLETED before filing this ticket.'
+   );
+
+   return;
+  }
+
+  if(
+   !confirm(
+    'Close and file this ticket? It will move to Filed Tickets.'
+   )
+  ){
+   return;
+  }
+
+  setSaving(true);
+  setError('');
+
+  const archivedAt=
+   new Date().toISOString();
+
+  const r=await sb
+   .from('tickets')
+   .update({
+    archived:true,
+    archived_at:archivedAt
+   })
+   .eq('id',form.id)
+   .select()
+   .single();
+
+  setSaving(false);
+
+  if(r.error){
+
+   setError(r.error.message);
+
+   return;
+  }
+
+  setTickets(prev=>
+   prev.map(t=>
+    t.id===r.data.id
+     ?r.data
+     :t
+   )
+  );
+
+  setNotice(
+   `Ticket #${r.data.ticket_number} closed and filed`
+  );
+
+  setTimeout(
+   ()=>setNotice(''),
+   2500
+  );
+
+  setModal(null);
+ }
+
+ async function reopenTicket(){
+
+  if(!form.id){
+   return;
+  }
+
+  if(
+   !confirm(
+    'Reopen this filed ticket?'
+   )
+  ){
+   return;
+  }
+
+  setSaving(true);
+  setError('');
+
+  const r=await sb
+   .from('tickets')
+   .update({
+    archived:false,
+    archived_at:null
+   })
+   .eq('id',form.id)
+   .select()
+   .single();
+
+  setSaving(false);
+
+  if(r.error){
+
+   setError(r.error.message);
+
+   return;
+  }
+
+  setTickets(prev=>
+   prev.map(t=>
+    t.id===r.data.id
+     ?r.data
+     :t
+   )
+  );
+
+  setNotice(
+   `Ticket #${r.data.ticket_number} reopened`
+  );
+
+  setTimeout(
+   ()=>setNotice(''),
+   2500
+  );
+
+  setModal(null);
+ }
+
  async function addPart(){
 
   if(!form.id){
@@ -1554,11 +1746,19 @@ function TicketForm({
  return <div className="form">
 
   <div className="ticketnumber">
+
    Ticket #{
     form.ticket_number
     ||
     'New'
    }
+
+   {form.archived&&
+    <span>
+     {' · FILED'}
+    </span>
+   }
+
   </div>
 
   <section className="intakebox">
@@ -1595,26 +1795,28 @@ function TicketForm({
 
        </div>
 
-       <button
-        className="small"
-        onClick={()=>{
+       {!form.archived&&
+        <button
+         className="small"
+         onClick={()=>{
 
-         setForm({
-          ...form,
-          customer_id:'',
-          equipment_id:''
-         });
+          setForm({
+           ...form,
+           customer_id:'',
+           equipment_id:''
+          });
 
-         setCustomerSearch('');
+          setCustomerSearch('');
 
-         setShowNewEquipment(
-          false
-         );
+          setShowNewEquipment(
+           false
+          );
 
-        }}
-       >
-        Change
-       </button>
+         }}
+        >
+         Change
+        </button>
+       }
 
       </div>
 
@@ -1782,12 +1984,14 @@ function TicketForm({
            ?'equipmentchoice selected'
            :'equipmentchoice'
          }
-         onClick={()=>
-          setForm({
-           ...form,
-           equipment_id:e.id
-          })
-         }
+         onClick={()=>{
+          if(!form.archived){
+           setForm({
+            ...form,
+            equipment_id:e.id
+           });
+          }
+         }}
         >
 
          <b>{label}</b>
@@ -1826,27 +2030,31 @@ function TicketForm({
      </div>
     }
 
-    <button
-     className="small"
-     onClick={()=>{
+    {!form.archived&&
+     <button
+      className="small"
+      onClick={()=>{
 
-      setShowNewEquipment(
-       !showNewEquipment
-      );
+       setShowNewEquipment(
+        !showNewEquipment
+       );
 
-      setNewEquipment({
-       ...blankEquipment,
-       customer_id:
-        form.customer_id
-      });
+       setNewEquipment({
+        ...blankEquipment,
+        customer_id:
+         form.customer_id
+       });
 
-     }}
-    >
-     ＋ New Equipment
-    </button>
+      }}
+     >
+      ＋ New Equipment
+     </button>
+    }
 
     {
      showNewEquipment
+     &&
+     !form.archived
      &&
      <div className="inlineform">
 
@@ -1974,22 +2182,24 @@ function TicketForm({
    </div>
   }
 
-  <button
-   onClick={
-    saveTicketKeepOpen
-   }
-   disabled={saving}
-  >
+  {!form.archived&&
+   <button
+    onClick={
+     saveTicketKeepOpen
+    }
+    disabled={saving}
+   >
 
-   {
-    saving
-     ?'Saving…'
-     :form.id
-      ?'Save Ticket'
-      :'Create Ticket & Continue'
-   }
+    {
+     saving
+      ?'Saving…'
+      :form.id
+       ?'Save Ticket'
+       :'Create Ticket & Continue'
+    }
 
-  </button>
+   </button>
+  }
 
   {form.id&&<>
 
@@ -2012,6 +2222,7 @@ function TicketForm({
        value={
         p.part_number||''
        }
+       disabled={form.archived}
        onChange={e=>
         updatePart(
          p.id,
@@ -2028,6 +2239,7 @@ function TicketForm({
        value={
         p.description||''
        }
+       disabled={form.archived}
        onChange={e=>
         updatePart(
          p.id,
@@ -2044,6 +2256,7 @@ function TicketForm({
        step="0.01"
        placeholder="Qty"
        value={p.quantity}
+       disabled={form.archived}
        onChange={e=>
         updatePart(
          p.id,
@@ -2060,6 +2273,7 @@ function TicketForm({
        step="0.01"
        placeholder="Price"
        value={p.unit_price}
+       disabled={form.archived}
        onChange={e=>
         updatePart(
          p.id,
@@ -2085,26 +2299,30 @@ function TicketForm({
        }
       </b>
 
-      <button
-       className="small danger"
-       onClick={()=>
-        deletePart(p.id)
-       }
-      >
-       Remove
-      </button>
+      {!form.archived&&
+       <button
+        className="small danger"
+        onClick={()=>
+         deletePart(p.id)
+        }
+       >
+        Remove
+       </button>
+      }
 
      </div>
 
     )
    }
 
-   <button
-    className="small"
-    onClick={addPart}
-   >
-    ＋ Add Part
-   </button>
+   {!form.archived&&
+    <button
+     className="small"
+     onClick={addPart}
+    >
+     ＋ Add Part
+    </button>
+   }
 
    <div className="subtotal">
     Parts: {
@@ -2131,6 +2349,7 @@ function TicketForm({
        value={
         l.description||''
        }
+       disabled={form.archived}
        onChange={e=>
         updateLabor(
          l.id,
@@ -2147,6 +2366,7 @@ function TicketForm({
        step="0.01"
        placeholder="Hours"
        value={l.hours}
+       disabled={form.archived}
        onChange={e=>
         updateLabor(
          l.id,
@@ -2165,6 +2385,7 @@ function TicketForm({
        value={
         l.hourly_rate
        }
+       disabled={form.archived}
        onChange={e=>
         updateLabor(
          l.id,
@@ -2190,26 +2411,30 @@ function TicketForm({
        }
       </b>
 
-      <button
-       className="small danger"
-       onClick={()=>
-        deleteLabor(l.id)
-       }
-      >
-       Remove
-      </button>
+      {!form.archived&&
+       <button
+        className="small danger"
+        onClick={()=>
+         deleteLabor(l.id)
+        }
+       >
+        Remove
+       </button>
+      }
 
      </div>
 
     )
    }
 
-   <button
-    className="small"
-    onClick={addLabor}
-   >
-    ＋ Add Labor
-   </button>
+   {!form.archived&&
+    <button
+     className="small"
+     onClick={addLabor}
+    >
+     ＋ Add Labor
+    </button>
+   }
 
    <div className="subtotal">
     Labor: {
@@ -2282,18 +2507,57 @@ function TicketForm({
     area
    />
 
-   <button
-    onClick={
-     saveTicketKeepOpen
+   {!form.archived&&
+    <button
+     onClick={
+      saveTicketKeepOpen
+     }
+     disabled={saving}
+    >
+     {
+      saving
+       ?'Saving…'
+       :'Save Ticket'
+     }
+    </button>
+   }
+
+   {
+    !form.archived
+    &&
+    form.status==='COMPLETED'
+    &&
+    <button
+     className="danger"
+     onClick={
+      closeAndFileTicket
+     }
+     disabled={saving}
+    >
+     Close & File Ticket
+    </button>
+   }
+
+   {form.archived&&<>
+
+    {form.archived_at&&
+     <div className="savefirst">
+      Filed {
+       new Date(
+        form.archived_at
+       ).toLocaleString()
+      }
+     </div>
     }
-    disabled={saving}
-   >
-    {
-     saving
-      ?'Saving…'
-      :'Save Ticket'
-    }
-   </button>
+
+    <button
+     onClick={reopenTicket}
+     disabled={saving}
+    >
+     Reopen Ticket
+    </button>
+
+   </>}
 
   </>}
 
