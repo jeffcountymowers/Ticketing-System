@@ -463,7 +463,7 @@ function App(){
             setModal('customer');
            }}
           >
-           Edit
+           Open
           </button>
 
           <button
@@ -696,26 +696,32 @@ function App(){
   {modal&&
 
    <Modal
-    title={
-     modal==='customer'
-      ?'Customer'
-      :modal==='equipment'
-       ?'Equipment'
-       :'Repair Ticket'
+   title={
+ modal==='customer'
+  ?'Customer'
+  :modal==='customerRecord'
+   ?'Customer Record'
+   :modal==='equipment'
+    ?'Equipment'
+    :'Repair Ticket'
+}
     }
     close={()=>
      setModal(null)
     }
    >
 
-    {modal==='customer'&&
+    {modal==='customerRecord'&&
 
-     <CustomerForm
-      form={form}
-      setForm={setForm}
-      save={save}
-     />
+ <CustomerRecord
+  customer={form}
+  equipment={equipment}
+  tickets={tickets}
+  setForm={setForm}
+  setModal={setModal}
+ />
 
+}
     }
 
     {modal==='equipment'&&
@@ -921,8 +927,242 @@ function TicketRow({
 
  </div>;
 }
+function CustomerRecord({
+ customer,
+ equipment,
+ tickets,
+ setForm,
+ setModal
+}){
 
-function CustomerForm({
+ const customerEquipment=
+  equipment.filter(
+   e=>e.customer_id===customer.id
+  );
+
+ const customerTickets=
+  tickets.filter(
+   t=>t.customer_id===customer.id
+  );
+
+ const equipmentLabel=id=>{
+
+  const e=equipment.find(
+   x=>x.id===id
+  );
+
+  if(!e){
+   return 'No equipment selected';
+  }
+
+  return (
+   [e.manufacturer,e.model]
+    .filter(Boolean)
+    .join(' ')
+   ||
+   e.equipment_type
+   ||
+   'Equipment'
+  );
+ };
+
+ return <div className="form">
+
+  <section className="intakebox">
+
+   <div className="sectionhead">
+    <h3>Customer Information</h3>
+   </div>
+
+   <div className="selectedcard">
+
+    <div>
+
+     <b>{customer.name}</b>
+
+     <small>
+      {customer.phone||'No phone'}
+     </small>
+
+     <small>
+      {customer.address||'No address'}
+     </small>
+
+     {customer.notes&&
+      <small>
+       Notes: {customer.notes}
+      </small>
+     }
+
+    </div>
+
+    <button
+     className="small"
+     onClick={()=>{
+      setForm(customer);
+      setModal('customer');
+     }}
+    >
+     Edit Customer
+    </button>
+
+   </div>
+
+  </section>
+
+
+  <section className="intakebox">
+
+   <div className="sectionhead">
+
+    <h3>
+     Equipment ({customerEquipment.length})
+    </h3>
+
+   </div>
+
+   {!customerEquipment.length&&
+    <div className="empty">
+     No equipment saved for this customer.
+    </div>
+   }
+
+   <div className="equipmentchoices">
+
+    {customerEquipment.map(e=>{
+
+     const label=
+      [e.manufacturer,e.model]
+       .filter(Boolean)
+       .join(' ')
+      ||
+      e.equipment_type
+      ||
+      'Equipment';
+
+     return <div
+      className="equipmentchoice"
+      key={e.id}
+     >
+
+      <b>{label}</b>
+
+      <span>
+       {e.equipment_type||'Equipment'}
+
+       {e.serial_number
+        ?` · S/N ${e.serial_number}`
+        :''
+       }
+      </span>
+
+      {e.engine&&
+       <span>
+        Engine: {e.engine}
+        {e.engine_model
+         ?` ${e.engine_model}`
+         :''
+        }
+       </span>
+      }
+
+      <button
+       className="small"
+       onClick={()=>{
+        setForm(e);
+        setModal('equipment');
+       }}
+      >
+       Edit Equipment
+      </button>
+
+     </div>;
+
+    })}
+
+   </div>
+
+  </section>
+
+
+  <section className="intakebox">
+
+   <div className="sectionhead">
+
+    <h3>
+     Service History ({customerTickets.length})
+    </h3>
+
+   </div>
+
+   {!customerTickets.length&&
+    <div className="empty">
+     No repair history for this customer.
+    </div>
+   }
+
+   {customerTickets.map(t=>
+
+    <div
+     className="row ticket"
+     key={t.id}
+    >
+
+     <div>
+
+      <b>
+       Ticket #{t.ticket_number}
+      </b>
+
+      <small>
+       {equipmentLabel(t.equipment_id)}
+      </small>
+
+      <small>
+       {t.customer_issue||'No issue entered'}
+      </small>
+
+      {t.archived&&t.archived_at&&
+       <small>
+        Filed: {
+         new Date(
+          t.archived_at
+         ).toLocaleString()
+        }
+       </small>
+      }
+
+     </div>
+
+     <span className="badge">
+      {t.archived
+       ?'FILED'
+       :t.status
+      }
+     </span>
+
+     <div className="rowactions">
+
+      <button
+       className="small"
+       onClick={()=>{
+        setForm(t);
+        setModal('ticket');
+       }}
+      >
+       Open Ticket
+      </button>
+
+     </div>
+
+    </div>
+
+   )}
+
+  </section>
+
+ </div>;
+}function CustomerForm({
  form,
  setForm,
  save
