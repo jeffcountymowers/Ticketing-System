@@ -460,7 +460,7 @@ function App(){
            className="small"
            onClick={()=>{
             setForm(c);
-            setModal('customer');
+            setModal('customerRecord');
            }}
           >
            Open
@@ -696,47 +696,48 @@ function App(){
   {modal&&
 
    <Modal
-   title={
- modal==='customer'
-  ?'Customer'
-  :modal==='customerRecord'
-   ?'Customer Record'
-   :modal==='equipment'
-    ?'Equipment'
-    :'Repair Ticket'
-}
+    title={
+     modal==='customer'
+      ?'Customer'
+      :modal==='customerRecord'
+       ?'Customer Record'
+       :modal==='equipment'
+        ?'Equipment'
+        :'Repair Ticket'
     }
     close={()=>
      setModal(null)
     }
    >
 
+    {modal==='customer'&&
+     <CustomerForm
+      form={form}
+      setForm={setForm}
+      save={save}
+     />
+    }
+
     {modal==='customerRecord'&&
-
- <CustomerRecord
-  customer={form}
-  equipment={equipment}
-  tickets={tickets}
-  setForm={setForm}
-  setModal={setModal}
- />
-
-}
+     <CustomerRecord
+      customer={form}
+      equipment={equipment}
+      tickets={tickets}
+      setForm={setForm}
+      setModal={setModal}
+     />
     }
 
     {modal==='equipment'&&
-
      <EquipmentForm
       form={form}
       setForm={setForm}
       save={save}
       customers={customers}
      />
-
     }
 
     {modal==='ticket'&&
-
      <TicketForm
       form={form}
       setForm={setForm}
@@ -749,7 +750,6 @@ function App(){
       setNotice={setNotice}
       setModal={setModal}
      />
-
     }
 
    </Modal>
@@ -1162,7 +1162,9 @@ function CustomerRecord({
   </section>
 
  </div>;
-}function CustomerForm({
+}
+
+function CustomerForm({
  form,
  setForm,
  save
