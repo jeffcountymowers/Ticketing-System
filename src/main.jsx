@@ -1942,7 +1942,9 @@ function TicketForm({
   setError('');
 
   const clean={...form};
-
+if(clean.equipment_id===''){
+  clean.equipment_id=null;
+}
   if(clean.estimate===''){
    clean.estimate=null;
   }
