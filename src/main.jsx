@@ -868,6 +868,18 @@ function App(){
 
      </>}
 
+     {tab==='Schedule'&&
+      <SchedulePage
+       schedule={schedule}
+       customers={customers}
+       equipment={equipment}
+       tickets={tickets}
+       setError={setError}
+       setNotice={setNotice}
+       reload={load}
+      />
+     }
+
      {tab==='Filed Tickets'&&<>
 
       <div className="top">
@@ -988,6 +1000,9 @@ function App(){
       equipment={equipment}
       setEquipment={setEquipment}
       partsCatalog={partsCatalog}
+      setPartsCatalog={setPartsCatalog}
+      communications={communications}
+      setCommunications={setCommunications}
       setTickets={setTickets}
       setError={setError}
       setNotice={setNotice}
@@ -1932,9 +1947,20 @@ function TicketForm({
 
   const clean={...form};
 
-  if(clean.estimate===''){
-   clean.estimate=null;
-  }
+  // Pickup/delivery date/time are Schedule helpers, not ticket-table columns.
+  const pickupDate=clean.pickup_date;
+  const pickupTime=clean.pickup_time;
+  const deliveryDate=clean.delivery_date;
+  const deliveryTime=clean.delivery_time;
+  delete clean.pickup_date;
+  delete clean.pickup_time;
+  delete clean.delivery_date;
+  delete clean.delivery_time;
+
+  if(clean.equipment_id==='') clean.equipment_id=null;
+  if(clean.estimate==='') clean.estimate=null;
+  if(clean.tax_rate==='' || clean.tax_rate==null) clean.tax_rate=0;
+  if(clean.pickup_delivery_cost==='' || clean.pickup_delivery_cost==null) clean.pickup_delivery_cost=0;
 
   const r=await sb
    .from('tickets')
@@ -1942,19 +1968,91 @@ function TicketForm({
    .select()
    .single();
 
-  setSaving(false);
-
   if(r.error){
-
+   setSaving(false);
    setError(r.error.message);
-
    return;
   }
+
+  const customer=customers.find(c=>c.id===r.data.customer_id);
+
+  async function syncScheduledStop(scheduleType,scheduledDate,scheduledTime){
+   // If this helper was never loaded/edited, leave any existing schedule alone.
+   if(scheduledDate===undefined) return null;
+
+   const existing=await sb
+    .from('schedule')
+    .select('id,status')
+    .eq('ticket_id',r.data.id)
+    .eq('schedule_type',scheduleType)
+    .eq('status','SCHEDULED');
+
+   if(existing.error) return existing.error;
+
+   if(!scheduledDate){
+    if(existing.data?.length){
+     const ids=existing.data.map(x=>x.id);
+     const removed=await sb.from('schedule').delete().in('id',ids);
+     if(removed.error) return removed.error;
+    }
+    return null;
+   }
+
+   const sameDay=await sb
+    .from('schedule')
+    .select('id')
+    .eq('schedule_type',scheduleType)
+    .eq('scheduled_date',scheduledDate)
+    .eq('status','SCHEDULED');
+   if(sameDay.error) return sameDay.error;
+   const existingIds=new Set((existing.data||[]).map(x=>x.id));
+   const sameDayCount=(sameDay.data||[]).filter(x=>!existingIds.has(x.id)).length;
+
+   let limitOverride=false;
+   if(sameDayCount>=2){
+    limitOverride=confirm(`${scheduleType==='PICKUP'?'Pickup':'Delivery'} limit reached for ${scheduledDate} — 2 of 2 scheduled. Override daily limit?`);
+    if(!limitOverride) return new Error('Schedule limit not overridden. Ticket was saved, but the stop was not scheduled.');
+   }
+
+   const payload={
+    ticket_id:r.data.id,
+    customer_id:r.data.customer_id,
+    equipment_id:r.data.equipment_id||null,
+    schedule_type:scheduleType,
+    scheduled_date:scheduledDate,
+    scheduled_time:scheduledTime||null,
+    address:customer?.address||'',
+    city:customer?.city||'',
+    limit_override:limitOverride
+   };
+
+   if(existing.data?.length){
+    const updated=await sb.from('schedule').update(payload).eq('id',existing.data[0].id);
+    if(updated.error) return updated.error;
+    if(existing.data.length>1){
+     const extras=existing.data.slice(1).map(x=>x.id);
+     const removed=await sb.from('schedule').delete().in('id',extras);
+     if(removed.error) return removed.error;
+    }
+   }else{
+    const inserted=await sb.from('schedule').insert(payload);
+    if(inserted.error) return inserted.error;
+   }
+   return null;
+  }
+
+  const pickupScheduleError=await syncScheduledStop('PICKUP',pickupDate,pickupTime);
+  const deliveryScheduleError=await syncScheduledStop('DELIVERY',deliveryDate,deliveryTime);
+
+  setSaving(false);
+
+  const scheduleError=pickupScheduleError||deliveryScheduleError;
+  if(scheduleError) setError(scheduleError.message);
 
   const wasExisting=
    Boolean(form.id);
 
-  setForm(r.data);
+  setForm({...r.data,pickup_date:pickupDate??'',pickup_time:pickupTime??'',delivery_date:deliveryDate??'',delivery_time:deliveryTime??''});
 
   setTickets(prev=>{
 
@@ -3383,15 +3481,64 @@ function SuggestField({l,k,f,s,opts}){
 }
 
 function SchedulePage({schedule,customers,equipment,tickets,setError,setNotice,reload}){
- const today=new Date().toISOString().slice(0,10); const [date,setDate]=useState(today),[type,setType]=useState('PICKUP'),[customerId,setCustomerId]=useState(''),[ticketId,setTicketId]=useState(''),[time,setTime]=useState(''),[notes,setNotes]=useState('');
- const day=schedule.filter(x=>x.scheduled_date===date&&x.status!=='CANCELLED'), pickups=day.filter(x=>x.schedule_type==='PICKUP'), deliveries=day.filter(x=>x.schedule_type==='DELIVERY'); const cname=id=>customers.find(x=>x.id===id)?.name||'Customer'; const selectedCustomer=customers.find(x=>x.id===customerId);
- async function add(){if(!customerId){alert('Select a customer.');return;} const count=type==='PICKUP'?pickups.length:deliveries.length; let override=false; if(count>=2){override=confirm(`${type==='PICKUP'?'Pickup':'Delivery'} limit reached for ${date} — 2 of 2 scheduled. Override daily limit?`);if(!override)return;} const t=tickets.find(x=>x.id===ticketId), e=t?equipment.find(x=>x.id===t.equipment_id):null; const r=await sb.from('schedule').insert({ticket_id:ticketId||null,customer_id:customerId,equipment_id:e?.id||null,schedule_type:type,scheduled_date:date,scheduled_time:time||null,address:selectedCustomer?.address||'',city:selectedCustomer?.city||'',notes,limit_override:override}).select().single(); if(r.error){setError(r.error.message);return;} setNotice('Scheduled');setTimeout(()=>setNotice(''),2000);await reload();}
- async function complete(x){const status=x.schedule_type==='PICKUP'?'PICKED_UP':'DELIVERED',now=new Date().toISOString();const r=await sb.from('schedule').update({status,completed_at:now}).eq('id',x.id);if(r.error){setError(r.error.message);return;}if(x.ticket_id){if(x.schedule_type==='PICKUP')await sb.from('tickets').update({transport_status:'PICKED_UP'}).eq('id',x.ticket_id);else await sb.from('tickets').update({transport_status:'DELIVERED',handoff_completed_at:now,archived:true,archived_at:now,status:'COMPLETED'}).eq('id',x.ticket_id);}await reload();}
- function route(x){const a=[x.address,x.city].filter(Boolean).join(', ');if(!a){alert('No customer address saved.');return;}window.open(`https://maps.apple.com/?daddr=${encodeURIComponent(a)}&dirflg=d`,'_blank');}
- function routeDay(){const stops=day.filter(x=>x.status==='SCHEDULED'&&x.address);if(!stops.length){alert('No scheduled addresses for this day.');return;}const addresses=stops.map(x=>[x.address,x.city].filter(Boolean).join(', ')).filter(Boolean);const destination=addresses[addresses.length-1];window.open(`https://maps.apple.com/?daddr=${encodeURIComponent(destination)}&dirflg=d`,'_blank');}
+ const today=new Date().toISOString().slice(0,10);
+ const [date,setDate]=useState(today),[type,setType]=useState('PICKUP'),[customerId,setCustomerId]=useState(''),[ticketId,setTicketId]=useState(''),[time,setTime]=useState(''),[notes,setNotes]=useState('');
+ const day=schedule.filter(x=>x.scheduled_date===date&&x.status!=='CANCELLED');
+ const activeDay=day.filter(x=>x.status==='SCHEDULED');
+ const pickups=activeDay.filter(x=>x.schedule_type==='PICKUP');
+ const deliveries=activeDay.filter(x=>x.schedule_type==='DELIVERY');
  const upcoming=schedule.filter(x=>x.status==='SCHEDULED'&&x.scheduled_date>=today).sort((a,b)=>`${a.scheduled_date} ${a.scheduled_time||''}`.localeCompare(`${b.scheduled_date} ${b.scheduled_time||''}`));
+ const cname=id=>customers.find(x=>x.id===id)?.name||'Customer';
+ const selectedCustomer=customers.find(x=>x.id===customerId);
+ async function add(){
+  if(!customerId){alert('Select a customer.');return;}
+  const count=type==='PICKUP'?pickups.length:deliveries.length;
+  let override=false;
+  if(count>=2){override=confirm(`${type==='PICKUP'?'Pickup':'Delivery'} limit reached for ${date} — 2 of 2 scheduled. Override daily limit?`);if(!override)return;}
+  const t=tickets.find(x=>x.id===ticketId),e=t?equipment.find(x=>x.id===t.equipment_id):null;
+  const r=await sb.from('schedule').insert({ticket_id:ticketId||null,customer_id:customerId,equipment_id:e?.id||null,schedule_type:type,scheduled_date:date,scheduled_time:time||null,address:selectedCustomer?.address||'',city:selectedCustomer?.city||'',notes,limit_override:override}).select().single();
+  if(r.error){setError(r.error.message);return;}
+  setNotice('Scheduled');setTimeout(()=>setNotice(''),2000);await reload(false);
+ }
+ async function complete(x){
+  const status=x.schedule_type==='PICKUP'?'PICKED_UP':'DELIVERED',now=new Date().toISOString();
+  const r=await sb.from('schedule').update({status,completed_at:now}).eq('id',x.id);
+  if(r.error){setError(r.error.message);return;}
+  if(x.ticket_id){
+   const tr=x.schedule_type==='PICKUP'
+    ? await sb.from('tickets').update({transport_status:'PICKED_UP'}).eq('id',x.ticket_id)
+    : await sb.from('tickets').update({transport_status:'DELIVERED',handoff_completed_at:now,archived:true,archived_at:now,status:'COMPLETED'}).eq('id',x.ticket_id);
+   if(tr.error){setError(tr.error.message);return;}
+  }
+  await reload(false);
+ }
+ async function deleteSchedule(x){
+  if(!confirm('Delete this scheduled pickup/delivery?'))return;
+  const r=await sb.from('schedule').delete().eq('id',x.id);
+  if(r.error){setError(r.error.message);return;}
+  setNotice('Scheduled item deleted');setTimeout(()=>setNotice(''),2000);await reload(false);
+ }
+ function route(x){
+  const a=[x.address,x.city].filter(Boolean).join(', ');
+  if(!a){alert('No customer address saved.');return;}
+  window.open(`https://maps.apple.com/?daddr=${encodeURIComponent(a)}&dirflg=d`,'_blank');
+ }
+ function routeDay(){
+  const stops=activeDay.filter(x=>x.address);
+  if(!stops.length){alert('No scheduled addresses for this day.');return;}
+  // Apple Maps web links support a single destination reliably. Open the first stop;
+  // each remaining stop still has its own Navigate button below.
+  route(stops[0]);
+ }
  const waiting=tickets.filter(t=>!t.archived&&t.pickup_delivery_type==='PICKUP'&&(!t.transport_status||t.transport_status==='WAITING_FOR_PICKUP'));
- return <><div className="top"><div><h2>Schedule</h2><p className="muted">Pickups {pickups.length}/2 · Deliveries {deliveries.length}/2</p></div><button onClick={routeDay}>Route Today's Stops</button></div><section className="panel"><div className="form"><Field l="Date" k="date" f={{date}} s={x=>setDate(x.date)} type="date"/><label>Type<select value={type} onChange={e=>setType(e.target.value)}><option>PICKUP</option><option>DELIVERY</option></select></label><label>Customer<select value={customerId} onChange={e=>setCustomerId(e.target.value)}><option value="">Select…</option>{customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label>Ticket<select value={ticketId} onChange={e=>setTicketId(e.target.value)}><option value="">Optional…</option>{tickets.filter(t=>!t.archived&&(!customerId||t.customer_id===customerId)).map(t=><option key={t.id} value={t.id}>#{t.ticket_number}</option>)}</select></label><Field l="Time" k="time" f={{time}} s={x=>setTime(x.time)} type="time"/><Field l="Notes" k="notes" f={{notes}} s={x=>setNotes(x.notes)} area/><button onClick={add}>Add to Schedule</button></div></section><section className="panel"><h3>{date} — Scheduled Stops</h3>{!day.length&&<div className="empty">Nothing scheduled.</div>}{day.map(x=><div className="row" key={x.id}><div><b>{x.schedule_type} · {cname(x.customer_id)}</b><small>{x.scheduled_time||'No time'} · {[x.address,x.city].filter(Boolean).join(', ')}</small><small>{x.status}{x.limit_override?' · LIMIT OVERRIDE':''}</small></div><div className="rowactions"><button className="small" onClick={()=>route(x)}>Navigate</button>{x.status==='SCHEDULED'&&<button className="small" onClick={()=>complete(x)}>{x.schedule_type==='PICKUP'?'Picked Up':'Delivered'}</button>}</div></div>)}</section><section className="panel"><h3>All Upcoming Pickups and Deliveries</h3>{!upcoming.length&&<div className="empty">No upcoming pickups or deliveries.</div>}{upcoming.map(x=><div className="row" key={`upcoming-${x.id}`}><div><b>{x.scheduled_date} · {x.schedule_type} · {cname(x.customer_id)}</b><small>{x.scheduled_time||'No time'} · {[x.address,x.city].filter(Boolean).join(', ')}</small><small>{x.notes||''}</small></div><div className="rowactions"><button className="small" onClick={()=>route(x)}>Navigate</button></div></div>)}</section>{waiting.length>0&&<section className="panel"><h3>Waiting for Pickup</h3>{waiting.map(t=><div className="row" key={t.id}><div><b>Ticket #{t.ticket_number} · {cname(t.customer_id)}</b><small>Not yet picked up</small></div></div>)}</section>}</>;
+ const stopRow=(x,keyPrefix='')=><div className="row" key={`${keyPrefix}${x.id}`}><div><b>{keyPrefix?`${x.scheduled_date} · `:''}{x.schedule_type} · {cname(x.customer_id)}</b><small>{x.scheduled_time||'No time'} · {[x.address,x.city].filter(Boolean).join(', ')||'No address'}</small><small>{x.status}{x.limit_override?' · LIMIT OVERRIDE':''}{x.notes?` · ${x.notes}`:''}</small></div><div className="rowactions"><button className="small" onClick={()=>route(x)}>Navigate</button>{x.status==='SCHEDULED'&&<button className="small" onClick={()=>complete(x)}>{x.schedule_type==='PICKUP'?'Picked Up':'Delivered'}</button>}{x.status==='SCHEDULED'&&<button className="small danger" onClick={()=>deleteSchedule(x)}>Delete</button>}</div></div>;
+ return <>
+  <div className="top"><div><h2>Schedule</h2><p className="muted">Pickups {pickups.length}/2 · Deliveries {deliveries.length}/2</p></div><button onClick={routeDay}>Navigate First Stop</button></div>
+  <section className="panel"><div className="form"><Field l="Date" k="date" f={{date}} s={x=>setDate(x.date)} type="date"/><label>Type<select value={type} onChange={e=>setType(e.target.value)}><option>PICKUP</option><option>DELIVERY</option></select></label><label>Customer<select value={customerId} onChange={e=>setCustomerId(e.target.value)}><option value="">Select…</option>{customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label>Ticket<select value={ticketId} onChange={e=>setTicketId(e.target.value)}><option value="">Optional…</option>{tickets.filter(t=>!t.archived&&(!customerId||t.customer_id===customerId)).map(t=><option key={t.id} value={t.id}>#{t.ticket_number}</option>)}</select></label><Field l="Time" k="time" f={{time}} s={x=>setTime(x.time)} type="time"/><Field l="Notes" k="notes" f={{notes}} s={x=>setNotes(x.notes)} area/><button onClick={add}>Add to Schedule</button></div></section>
+  <section className="panel"><h3>{date} — Scheduled Stops</h3>{!day.length&&<div className="empty">Nothing scheduled.</div>}{day.map(x=>stopRow(x))}</section>
+  <section className="panel"><h3>All Upcoming Pickups and Deliveries</h3>{!upcoming.length&&<div className="empty">No upcoming pickups or deliveries.</div>}{upcoming.map(x=>stopRow(x,'upcoming-'))}</section>
+  {waiting.length>0&&<section className="panel"><h3>Waiting for Pickup</h3>{waiting.map(t=><div className="row" key={t.id}><div><b>Ticket #{t.ticket_number} · {cname(t.customer_id)}</b><small>Not yet picked up</small></div></div>)}</section>}
+ </>;
 }
 
 function Field({
