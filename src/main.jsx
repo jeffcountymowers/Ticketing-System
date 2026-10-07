@@ -868,6 +868,18 @@ function App(){
 
      </>}
 
+     {tab==='Schedule'&&
+      <SchedulePage
+       schedule={schedule}
+       customers={customers}
+       equipment={equipment}
+       tickets={tickets}
+       setError={setError}
+       setNotice={setNotice}
+       reload={load}
+      />
+     }
+
      {tab==='Filed Tickets'&&<>
 
       <div className="top">
@@ -1919,22 +1931,30 @@ function TicketForm({
  async function saveTicketKeepOpen(){
 
   if(!form.customer_id){
-
-   alert(
-    'Select or create a customer first.'
-   );
-
+   alert('Select or create a customer first.');
    return;
   }
 
   setSaving(true);
   setError('');
 
-  const clean={...form};
+  const pickupDate=form.pickup_date||'';
+  const pickupTime=form.pickup_time||'';
+  const deliveryDate=form.delivery_date||'';
+  const deliveryTime=form.delivery_time||'';
 
-  if(clean.estimate===''){
-   clean.estimate=null;
-  }
+  const clean={...form};
+  delete clean.pickup_date;
+  delete clean.pickup_time;
+  delete clean.delivery_date;
+  delete clean.delivery_time;
+
+  if(clean.equipment_id==='') clean.equipment_id=null;
+  if(clean.estimate==='') clean.estimate=null;
+  if(clean.tax_rate==='' || clean.tax_rate==null) clean.tax_rate=0;
+  if(clean.pickup_delivery_cost==='' || clean.pickup_delivery_cost==null) clean.pickup_delivery_cost=0;
+
+  const wasExisting=Boolean(form.id);
 
   const r=await sb
    .from('tickets')
@@ -1942,52 +1962,85 @@ function TicketForm({
    .select()
    .single();
 
-  setSaving(false);
-
   if(r.error){
-
+   setSaving(false);
    setError(r.error.message);
-
    return;
   }
 
-  const wasExisting=
-   Boolean(form.id);
+  const selectedCustomer=customers.find(x=>x.id===r.data.customer_id);
 
+  async function addTicketSchedule(scheduleType,date,time){
+   if(!date)return true;
+
+   const countResult=await sb
+    .from('schedule')
+    .select('id')
+    .eq('scheduled_date',date)
+    .eq('schedule_type',scheduleType)
+    .neq('status','CANCELLED');
+
+   if(countResult.error){
+    setError(`Ticket saved, but schedule check failed: ${countResult.error.message}`);
+    return false;
+   }
+
+   let override=false;
+   if((countResult.data||[]).length>=2){
+    override=confirm(`${scheduleType==='PICKUP'?'Pickup':'Delivery'} limit reached for ${date} — 2 of 2 scheduled. Override daily limit?`);
+    if(!override)return true;
+   }
+
+   const scheduleResult=await sb
+    .from('schedule')
+    .insert({
+     ticket_id:r.data.id,
+     customer_id:r.data.customer_id,
+     equipment_id:r.data.equipment_id||null,
+     schedule_type:scheduleType,
+     scheduled_date:date,
+     scheduled_time:time||null,
+     address:selectedCustomer?.address||'',
+     city:selectedCustomer?.city||'',
+     notes:form.pickup_delivery_details||'',
+     limit_override:override
+    });
+
+   if(scheduleResult.error){
+    setError(`Ticket saved, but ${scheduleType.toLowerCase()} scheduling failed: ${scheduleResult.error.message}`);
+    return false;
+   }
+
+   return true;
+  }
+
+  const pickupOk=await addTicketSchedule('PICKUP',pickupDate,pickupTime);
+  const deliveryOk=pickupOk
+   ?await addTicketSchedule('DELIVERY',deliveryDate,deliveryTime)
+   :false;
+
+  setSaving(false);
   setForm(r.data);
 
   setTickets(prev=>{
-
-   const exists=
-    prev.some(
-     t=>t.id===r.data.id
-    );
-
+   const exists=prev.some(t=>t.id===r.data.id);
    return exists
-
-    ? prev.map(
-       t=>
-        t.id===r.data.id
-         ?r.data
-         :t
-      )
-
-    : [r.data,...prev];
-
+    ?prev.map(t=>t.id===r.data.id?r.data:t)
+    :[r.data,...prev];
   });
 
-  setNotice(
-   wasExisting
-    ?'Ticket saved'
-    :'Ticket created — you can now add parts and labor'
-  );
-
-  setTimeout(
-   ()=>setNotice(''),
-   2500
-  );
+  if(pickupOk&&deliveryOk){
+   const scheduled=[];
+   if(pickupDate)scheduled.push('pickup');
+   if(deliveryDate)scheduled.push('delivery');
+   setNotice(
+    scheduled.length
+     ?`Ticket saved and ${scheduled.join(' and ')} scheduled`
+     :(wasExisting?'Ticket saved':'Ticket created — you can now add parts and labor')
+   );
+   setTimeout(()=>setNotice(''),2500);
+  }
  }
-
  async function closeAndFileTicket(){
 
   if(!form.id){
@@ -3387,10 +3440,11 @@ function SchedulePage({schedule,customers,equipment,tickets,setError,setNotice,r
  const day=schedule.filter(x=>x.scheduled_date===date&&x.status!=='CANCELLED'), pickups=day.filter(x=>x.schedule_type==='PICKUP'), deliveries=day.filter(x=>x.schedule_type==='DELIVERY'); const cname=id=>customers.find(x=>x.id===id)?.name||'Customer'; const selectedCustomer=customers.find(x=>x.id===customerId);
  async function add(){if(!customerId){alert('Select a customer.');return;} const count=type==='PICKUP'?pickups.length:deliveries.length; let override=false; if(count>=2){override=confirm(`${type==='PICKUP'?'Pickup':'Delivery'} limit reached for ${date} — 2 of 2 scheduled. Override daily limit?`);if(!override)return;} const t=tickets.find(x=>x.id===ticketId), e=t?equipment.find(x=>x.id===t.equipment_id):null; const r=await sb.from('schedule').insert({ticket_id:ticketId||null,customer_id:customerId,equipment_id:e?.id||null,schedule_type:type,scheduled_date:date,scheduled_time:time||null,address:selectedCustomer?.address||'',city:selectedCustomer?.city||'',notes,limit_override:override}).select().single(); if(r.error){setError(r.error.message);return;} setNotice('Scheduled');setTimeout(()=>setNotice(''),2000);await reload();}
  async function complete(x){const status=x.schedule_type==='PICKUP'?'PICKED_UP':'DELIVERED',now=new Date().toISOString();const r=await sb.from('schedule').update({status,completed_at:now}).eq('id',x.id);if(r.error){setError(r.error.message);return;}if(x.ticket_id){if(x.schedule_type==='PICKUP')await sb.from('tickets').update({transport_status:'PICKED_UP'}).eq('id',x.ticket_id);else await sb.from('tickets').update({transport_status:'DELIVERED',handoff_completed_at:now,archived:true,archived_at:now,status:'COMPLETED'}).eq('id',x.ticket_id);}await reload();}
+ async function deleteSchedule(x){if(!confirm('Delete this scheduled pickup/delivery?'))return;const r=await sb.from('schedule').delete().eq('id',x.id);if(r.error){setError(r.error.message);return;}setNotice('Scheduled item deleted.');setTimeout(()=>setNotice(''),2000);await reload();}
  function route(x){const a=[x.address,x.city].filter(Boolean).join(', ');if(!a){alert('No customer address saved.');return;}window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(a)}`,'_blank');}
  function routeDay(){const stops=day.filter(x=>x.status==='SCHEDULED'&&x.address);if(!stops.length){alert('No scheduled addresses for this day.');return;}const dest=encodeURIComponent([stops.at(-1).address,stops.at(-1).city].filter(Boolean).join(', ')),way=stops.slice(0,-1).map(x=>encodeURIComponent([x.address,x.city].filter(Boolean).join(', '))).join('%7C');window.open(`https://www.google.com/maps/dir/?api=1&destination=${dest}${way?`&waypoints=${way}`:''}`,'_blank');}
  const waiting=tickets.filter(t=>!t.archived&&t.pickup_delivery_type==='PICKUP'&&(!t.transport_status||t.transport_status==='WAITING_FOR_PICKUP'));
- return <><div className="top"><div><h2>Schedule</h2><p className="muted">Pickups {pickups.length}/2 · Deliveries {deliveries.length}/2</p></div><button onClick={routeDay}>Route Today's Stops</button></div><section className="panel"><div className="form"><Field l="Date" k="date" f={{date}} s={x=>setDate(x.date)} type="date"/><label>Type<select value={type} onChange={e=>setType(e.target.value)}><option>PICKUP</option><option>DELIVERY</option></select></label><label>Customer<select value={customerId} onChange={e=>setCustomerId(e.target.value)}><option value="">Select…</option>{customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label>Ticket<select value={ticketId} onChange={e=>setTicketId(e.target.value)}><option value="">Optional…</option>{tickets.filter(t=>!t.archived&&(!customerId||t.customer_id===customerId)).map(t=><option key={t.id} value={t.id}>#{t.ticket_number}</option>)}</select></label><Field l="Time" k="time" f={{time}} s={x=>setTime(x.time)} type="time"/><Field l="Notes" k="notes" f={{notes}} s={x=>setNotes(x.notes)} area/><button onClick={add}>Add to Schedule</button></div></section><section className="panel"><h3>{date} — Scheduled Stops</h3>{!day.length&&<div className="empty">Nothing scheduled.</div>}{day.map(x=><div className="row" key={x.id}><div><b>{x.schedule_type} · {cname(x.customer_id)}</b><small>{x.scheduled_time||'No time'} · {[x.address,x.city].filter(Boolean).join(', ')}</small><small>{x.status}{x.limit_override?' · LIMIT OVERRIDE':''}</small></div><div className="rowactions"><button className="small" onClick={()=>route(x)}>Navigate</button>{x.status==='SCHEDULED'&&<button className="small" onClick={()=>complete(x)}>{x.schedule_type==='PICKUP'?'Picked Up':'Delivered'}</button>}</div></div>)}</section>{waiting.length>0&&<section className="panel"><h3>Waiting for Pickup</h3>{waiting.map(t=><div className="row" key={t.id}><div><b>Ticket #{t.ticket_number} · {cname(t.customer_id)}</b><small>Not yet picked up</small></div></div>)}</section>}</>;
+ return <><div className="top"><div><h2>Schedule</h2><p className="muted">Pickups {pickups.length}/2 · Deliveries {deliveries.length}/2</p></div><button onClick={routeDay}>Route Today's Stops</button></div><section className="panel"><div className="form"><Field l="Date" k="date" f={{date}} s={x=>setDate(x.date)} type="date"/><label>Type<select value={type} onChange={e=>setType(e.target.value)}><option>PICKUP</option><option>DELIVERY</option></select></label><label>Customer<select value={customerId} onChange={e=>setCustomerId(e.target.value)}><option value="">Select…</option>{customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label>Ticket<select value={ticketId} onChange={e=>setTicketId(e.target.value)}><option value="">Optional…</option>{tickets.filter(t=>!t.archived&&(!customerId||t.customer_id===customerId)).map(t=><option key={t.id} value={t.id}>#{t.ticket_number}</option>)}</select></label><Field l="Time" k="time" f={{time}} s={x=>setTime(x.time)} type="time"/><Field l="Notes" k="notes" f={{notes}} s={x=>setNotes(x.notes)} area/><button onClick={add}>Add to Schedule</button></div></section><section className="panel"><h3>{date} — Scheduled Stops</h3>{!day.length&&<div className="empty">Nothing scheduled.</div>}{day.map(x=><div className="row" key={x.id}><div><b>{x.schedule_type} · {cname(x.customer_id)}</b><small>{x.scheduled_time||'No time'} · {[x.address,x.city].filter(Boolean).join(', ')}</small><small>{x.status}{x.limit_override?' · LIMIT OVERRIDE':''}</small></div><div className="rowactions"><button className="small" onClick={()=>route(x)}>Navigate</button>{x.status==='SCHEDULED'&&<button className="small" onClick={()=>complete(x)}>{x.schedule_type==='PICKUP'?'Picked Up':'Delivered'}</button>}<button className="small danger" onClick={()=>deleteSchedule(x)}>Delete</button></div></div>)}</section>{waiting.length>0&&<section className="panel"><h3>Waiting for Pickup</h3>{waiting.map(t=><div className="row" key={t.id}><div><b>Ticket #{t.ticket_number} · {cname(t.customer_id)}</b><small>Not yet picked up</small></div></div>)}</section>}</>;
 }
 
 function Field({
