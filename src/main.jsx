@@ -10,8 +10,11 @@ const sb=createClient(
 
 const statuses=[
  'NEW','DIAGNOSING','WAITING FOR APPROVAL','WAITING FOR PARTS',
- 'REPAIRING','READY FOR PICKUP','COMPLETED'
+ 'REPAIRING','READY FOR PICKUP','PENDING DELIVERY','COMPLETED'
 ];
+
+const commonEquipmentBrands=['Ariens','Bad Boy','BigDog','Bobcat','Craftsman','Cub Cadet','Exmark','Ferris','Gravely','Husqvarna','Hustler','John Deere','Kubota','Scag','Simplicity','Snapper','Toro','Troy-Bilt','Walker'];
+const commonEngineBrands=['Briggs & Stratton','Honda','Kawasaki','Kohler','Kubota','Tecumseh','Vanguard','Yamaha'];
 
 const approvals=[
  'PENDING','APPROVED','DECLINED','NOT_REQUIRED'
@@ -25,7 +28,7 @@ const blankCatalogPart={
  part_number:'',
  description:'',
  price:'',
- notes:''
+ notes:'',quantity_on_hand:0,cost:0,supplier:'',bin_location:'',low_stock_level:0
 };
 
 const blankEquipment={
@@ -55,7 +58,7 @@ const blankTicket={
  status:'NEW',
  tax_rate:0,
  archived:false,
- archived_at:null
+ archived_at:null,transport_status:'',pickup_delivery_type:'',handoff_completed_at:null
 };
 
 const money=n=>Number(n||0).toLocaleString(
@@ -137,6 +140,8 @@ function App(){
  const [equipment,setEquipment]=useState([]);
  const [tickets,setTickets]=useState([]);
  const [partsCatalog,setPartsCatalog]=useState([]);
+ const [schedule,setSchedule]=useState([]);
+ const [communications,setCommunications]=useState([]);
  const [loading,setLoading]=useState(true);
  const [q,setQ]=useState('');
  const [modal,setModal]=useState(null);
@@ -184,6 +189,8 @@ function App(){
    .on('postgres_changes',{event:'*',schema:'public',table:'ticket_parts'},refresh)
    .on('postgres_changes',{event:'*',schema:'public',table:'ticket_labor'},refresh)
    .on('postgres_changes',{event:'*',schema:'public',table:'parts_catalog'},refresh)
+   .on('postgres_changes',{event:'*',schema:'public',table:'schedule'},refresh)
+   .on('postgres_changes',{event:'*',schema:'public',table:'customer_communications'},refresh)
    .subscribe();
 
   // iPhones can pause WebSocket connections when the app is backgrounded.
@@ -220,7 +227,7 @@ function App(){
 
   if(showSpinner)setLoading(true);
 
-  const [c,e,t,p]=await Promise.all([
+  const [c,e,t,p,sc,cm]=await Promise.all([
 
    sb.from('customers')
     .select('*')
@@ -236,11 +243,14 @@ function App(){
 
    sb.from('parts_catalog')
     .select('*')
-    .order('part_number')
+    .order('part_number'),
+
+    sb.from('schedule').select('*').order('scheduled_date',{ascending:true}),
+    sb.from('customer_communications').select('*').order('created_at',{ascending:false})
 
   ]);
 
-  const err=c.error||e.error||t.error||p.error;
+  const err=c.error||e.error||t.error||p.error||sc.error||cm.error;
 
   if(err)setError(err.message);
 
@@ -248,6 +258,8 @@ function App(){
   setEquipment(e.data||[]);
   setTickets(t.data||[]);
   setPartsCatalog(p.data||[]);
+   setSchedule(sc.data||[]);
+   setCommunications(cm.data||[]);
 
   if(showSpinner)setLoading(false);
  }
@@ -266,6 +278,9 @@ function App(){
 
   if(table==='parts_catalog'){
    if(clean.price==='' || clean.price==null) clean.price=0;
+    if(clean.cost==='' || clean.cost==null) clean.cost=0;
+    if(clean.quantity_on_hand==='' || clean.quantity_on_hand==null) clean.quantity_on_hand=0;
+    if(clean.low_stock_level==='' || clean.low_stock_level==null) clean.low_stock_level=0;
   }
 
   const r=await sb
@@ -371,33 +386,13 @@ function App(){
    t=>t.archived
   );
 
- const filteredTickets=
-  activeTickets.filter(t=>
-   search({
-    ...t,
-    customer:customerName(
-     t.customer_id
-    ),
-    equipment:equipmentName(
-     t.equipment_id
-    )
-   })
-  );
-
- const filteredArchivedTickets=
-  archivedTickets.filter(t=>
-   search({
-    ...t,
-    customer:customerName(
-     t.customer_id
-    ),
-    equipment:equipmentName(
-     t.equipment_id
-    )
-   })
-  );
-
- if(!session){
+ const ticketSearchRecord=t=>{
+  const c=customers.find(x=>x.id===t.customer_id)||{};
+  const e=equipment.find(x=>x.id===t.equipment_id)||{};
+  return {...t,...c,equipment_type:e.equipment_type,manufacturer:e.manufacturer,equipment_model:e.model,serial_number:e.serial_number,engine:e.engine,engine_model:e.engine_model};
+ };
+ const filteredTickets=activeTickets.filter(t=>search(ticketSearchRecord(t)));
+ const filteredArchivedTickets=archivedTickets.filter(t=>search(ticketSearchRecord(t))); if(!session){
 
   return <Login
    error={error}
@@ -777,7 +772,7 @@ function App(){
           </small>
 
           <small>
-           Price: {money(p.price)}
+           Price: {money(p.price)} · Stock: {p.quantity_on_hand??0}{Number(p.quantity_on_hand||0)<=Number(p.low_stock_level||0)?' · LOW STOCK':''}
           </small>
 
          </div>
@@ -967,6 +962,7 @@ function App(){
       setForm={setForm}
       save={save}
       customers={customers}
+       equipment={equipment}
      />
     }
 
@@ -1500,6 +1496,12 @@ function PartForm({
    type="number"
   />
 
+  <Field l="Quantity On Hand" k="quantity_on_hand" f={form} s={setForm} type="number" />
+  <Field l="Cost" k="cost" f={form} s={setForm} type="number" />
+  <Field l="Supplier" k="supplier" f={form} s={setForm} />
+  <Field l="Bin / Shelf Location" k="bin_location" f={form} s={setForm} />
+  <Field l="Low Stock Alert At" k="low_stock_level" f={form} s={setForm} type="number" />
+
   <Field
    l="Notes"
    k="notes"
@@ -1532,7 +1534,8 @@ function EquipmentForm({
  form,
  setForm,
  save,
- customers
+ customers,
+ equipment
 }){
 
  return <div className="form">
@@ -1559,12 +1562,7 @@ function EquipmentForm({
    s={setForm}
   />
 
-  <Field
-   l="Manufacturer"
-   k="manufacturer"
-   f={form}
-   s={setForm}
-  />
+  <SuggestField l="Manufacturer" k="manufacturer" f={form} s={setForm} opts={[...new Set([...commonEquipmentBrands,...equipment.map(x=>x.manufacturer).filter(Boolean)])].sort()} />
 
   <Field
    l="Model"
@@ -1580,12 +1578,7 @@ function EquipmentForm({
    s={setForm}
   />
 
-  <Field
-   l="Engine"
-   k="engine"
-   f={form}
-   s={setForm}
-  />
+  <SuggestField l="Engine" k="engine" f={form} s={setForm} opts={[...new Set([...commonEngineBrands,...equipment.map(x=>x.engine).filter(Boolean)])].sort()} />
 
   <Field
    l="Engine Model"
@@ -1624,6 +1617,9 @@ function TicketForm({
  equipment,
  setEquipment,
  partsCatalog,
+ setPartsCatalog,
+ communications,
+ setCommunications,
  setTickets,
  setError,
  setNotice,
@@ -2910,7 +2906,8 @@ function TicketForm({
 
       <input
        type="number"
-       step="0.01"
+       step="1"
+       min="1"
        placeholder="Qty"
        value={p.quantity}
        disabled={form.archived}
@@ -3206,6 +3203,10 @@ function TicketForm({
 
    </div>
 
+   <section className="intakebox"><div className="sectionhead"><h3>Customer Communication</h3></div>{!form.archived&&<div className="rowactions">{['CALLED CUSTOMER','LEFT VOICEMAIL','ESTIMATE APPROVED','ESTIMATE DECLINED','CUSTOMER NOTIFIED READY'].map(type=><button className="small" key={type} onClick={()=>addCommunication(type)}>{type}</button>)}</div>}{(communications||[]).filter(x=>x.ticket_id===form.id).slice(0,8).map(x=><small key={x.id}>{new Date(x.created_at).toLocaleString()} · {x.communication_type}</small>)}</section>
+
+   <button className="small" onClick={printInvoice}>Print / Save Invoice PDF</button>
+
    <Field
     l="Technician Notes"
     k="technician_notes"
@@ -3269,6 +3270,21 @@ function TicketForm({
   </>}
 
  </div>;
+}
+
+function SuggestField({l,k,f,s,opts}){
+ const id=`list-${k}`; return <label>{l}<input list={id} value={f[k]||''} onChange={e=>s({...f,[k]:e.target.value})}/><datalist id={id}>{opts.map(x=><option key={x} value={x}/>)}</datalist></label>;
+}
+
+function SchedulePage({schedule,customers,equipment,tickets,setError,setNotice,reload}){
+ const today=new Date().toISOString().slice(0,10); const [date,setDate]=useState(today),[type,setType]=useState('PICKUP'),[customerId,setCustomerId]=useState(''),[ticketId,setTicketId]=useState(''),[time,setTime]=useState(''),[notes,setNotes]=useState('');
+ const day=schedule.filter(x=>x.scheduled_date===date&&x.status!=='CANCELLED'), pickups=day.filter(x=>x.schedule_type==='PICKUP'), deliveries=day.filter(x=>x.schedule_type==='DELIVERY'); const cname=id=>customers.find(x=>x.id===id)?.name||'Customer'; const selectedCustomer=customers.find(x=>x.id===customerId);
+ async function add(){if(!customerId){alert('Select a customer.');return;} const count=type==='PICKUP'?pickups.length:deliveries.length; let override=false; if(count>=2){override=confirm(`${type==='PICKUP'?'Pickup':'Delivery'} limit reached for ${date} — 2 of 2 scheduled. Override daily limit?`);if(!override)return;} const t=tickets.find(x=>x.id===ticketId), e=t?equipment.find(x=>x.id===t.equipment_id):null; const r=await sb.from('schedule').insert({ticket_id:ticketId||null,customer_id:customerId,equipment_id:e?.id||null,schedule_type:type,scheduled_date:date,scheduled_time:time||null,address:selectedCustomer?.address||'',city:selectedCustomer?.city||'',notes,limit_override:override}).select().single(); if(r.error){setError(r.error.message);return;} setNotice('Scheduled');setTimeout(()=>setNotice(''),2000);await reload();}
+ async function complete(x){const status=x.schedule_type==='PICKUP'?'PICKED_UP':'DELIVERED',now=new Date().toISOString();const r=await sb.from('schedule').update({status,completed_at:now}).eq('id',x.id);if(r.error){setError(r.error.message);return;}if(x.ticket_id){if(x.schedule_type==='PICKUP')await sb.from('tickets').update({transport_status:'PICKED_UP'}).eq('id',x.ticket_id);else await sb.from('tickets').update({transport_status:'DELIVERED',handoff_completed_at:now,archived:true,archived_at:now,status:'COMPLETED'}).eq('id',x.ticket_id);}await reload();}
+ function route(x){const a=[x.address,x.city].filter(Boolean).join(', ');if(!a){alert('No customer address saved.');return;}window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(a)}`,'_blank');}
+ function routeDay(){const stops=day.filter(x=>x.status==='SCHEDULED'&&x.address);if(!stops.length){alert('No scheduled addresses for this day.');return;}const dest=encodeURIComponent([stops.at(-1).address,stops.at(-1).city].filter(Boolean).join(', ')),way=stops.slice(0,-1).map(x=>encodeURIComponent([x.address,x.city].filter(Boolean).join(', '))).join('%7C');window.open(`https://www.google.com/maps/dir/?api=1&destination=${dest}${way?`&waypoints=${way}`:''}`,'_blank');}
+ const waiting=tickets.filter(t=>!t.archived&&t.pickup_delivery_type==='PICKUP'&&(!t.transport_status||t.transport_status==='WAITING_FOR_PICKUP'));
+ return <><div className="top"><div><h2>Schedule</h2><p className="muted">Pickups {pickups.length}/2 · Deliveries {deliveries.length}/2</p></div><button onClick={routeDay}>Route Today's Stops</button></div><section className="panel"><div className="form"><Field l="Date" k="date" f={{date}} s={x=>setDate(x.date)} type="date"/><label>Type<select value={type} onChange={e=>setType(e.target.value)}><option>PICKUP</option><option>DELIVERY</option></select></label><label>Customer<select value={customerId} onChange={e=>setCustomerId(e.target.value)}><option value="">Select…</option>{customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label>Ticket<select value={ticketId} onChange={e=>setTicketId(e.target.value)}><option value="">Optional…</option>{tickets.filter(t=>!t.archived&&(!customerId||t.customer_id===customerId)).map(t=><option key={t.id} value={t.id}>#{t.ticket_number}</option>)}</select></label><Field l="Time" k="time" f={{time}} s={x=>setTime(x.time)} type="time"/><Field l="Notes" k="notes" f={{notes}} s={x=>setNotes(x.notes)} area/><button onClick={add}>Add to Schedule</button></div></section><section className="panel"><h3>{date} — Scheduled Stops</h3>{!day.length&&<div className="empty">Nothing scheduled.</div>}{day.map(x=><div className="row" key={x.id}><div><b>{x.schedule_type} · {cname(x.customer_id)}</b><small>{x.scheduled_time||'No time'} · {[x.address,x.city].filter(Boolean).join(', ')}</small><small>{x.status}{x.limit_override?' · LIMIT OVERRIDE':''}</small></div><div className="rowactions"><button className="small" onClick={()=>route(x)}>Navigate</button>{x.status==='SCHEDULED'&&<button className="small" onClick={()=>complete(x)}>{x.schedule_type==='PICKUP'?'Picked Up':'Delivered'}</button>}</div></div>)}</section>{waiting.length>0&&<section className="panel"><h3>Waiting for Pickup</h3>{waiting.map(t=><div className="row" key={t.id}><div><b>Ticket #{t.ticket_number} · {cname(t.customer_id)}</b><small>Not yet picked up</small></div></div>)}</section>}</>;
 }
 
 function Field({
