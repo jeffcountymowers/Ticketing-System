@@ -2307,6 +2307,7 @@ function TicketForm({
   }
 
   const oldQty=Number(oldPart.quantity||0);
+
   const newQty=
     changes.quantity!==undefined
       ? Number(changes.quantity)
@@ -2317,7 +2318,7 @@ function TicketForm({
     return;
   }
 
-  const catalogPart=catalog.find(
+  const catalogPart=partsCatalog.find(
     c=>
       String(c.part_number||'').trim().toLowerCase()===
       String(oldPart.part_number||'').trim().toLowerCase()
@@ -2357,7 +2358,7 @@ function TicketForm({
       .eq('id',id);
 
     if(r.error){
-      // Restore inventory if the ticket update fails.
+      // Put inventory back if updating the ticket part fails.
       await sb
         .from('parts_catalog')
         .update({
@@ -2369,7 +2370,7 @@ function TicketForm({
       return;
     }
 
-    setCatalog(prev=>
+    setPartsCatalog(prev=>
       prev.map(c=>
         String(c.id)===String(catalogPart.id)
           ? {...c,quantity_on_hand:newStock}
@@ -2420,7 +2421,7 @@ function TicketForm({
   }
  }
 
- async function deletePart(id){
+async function deletePart(id){
   const part=parts.find(
     p=>String(p.id)===String(id)
   );
@@ -2429,7 +2430,7 @@ function TicketForm({
     return;
   }
 
-  const catalogPart=catalog.find(
+  const catalogPart=partsCatalog.find(
     c=>
       String(c.part_number||'').trim().toLowerCase()===
       String(part.part_number||'').trim().toLowerCase()
@@ -2468,7 +2469,7 @@ function TicketForm({
       return;
     }
 
-    setCatalog(prev=>
+    setPartsCatalog(prev=>
       prev.map(c=>
         String(c.id)===String(catalogPart.id)
           ? {...c,quantity_on_hand:newStock}
