@@ -2191,7 +2191,7 @@ function TicketForm({
     return;
   }
 
-  const part=catalog.find(
+  const part=partsCatalog.find(
     x=>String(x.id)===String(catalogPartId)
   );
 
@@ -2244,7 +2244,7 @@ function TicketForm({
     return;
   }
 
-  setParts(prev=>[
+  setPartsCatalog(prev=>[
     ...prev,
     r.data
   ]);
