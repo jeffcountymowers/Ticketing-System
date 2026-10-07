@@ -2244,7 +2244,7 @@ function TicketForm({
     return;
   }
 
-  setPartsCatalog(prev=>[
+  setParts(prev=>[
     ...prev,
     r.data
   ]);
