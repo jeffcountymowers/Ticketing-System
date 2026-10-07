@@ -2181,54 +2181,84 @@ function TicketForm({
  }
 
  async function addCatalogPart(){
+  if(!form.id){
+    alert('Save the ticket first, then add parts.');
+    return;
+  }
 
   if(!catalogPartId){
-   alert('Select a saved part first.');
-   return;
+    alert('Select a part first.');
+    return;
   }
 
-  if(!form.id){
-   alert(
-    'Save the ticket first, then add parts.'
-   );
-   return;
-  }
-
-  const part=
-   partsCatalog.find(
-    p=>p.id===catalogPartId
-   );
+  const part=catalog.find(
+    x=>String(x.id)===String(catalogPartId)
+  );
 
   if(!part){
-   return;
+    alert('Part not found in catalog.');
+    return;
+  }
+
+  const currentStock=Number(part.quantity_on_hand||0);
+
+  if(currentStock<1){
+    alert('This part is out of stock.');
+    return;
   }
 
   const r=await sb
-   .from('ticket_parts')
-   .insert({
-    ticket_id:form.id,
-    part_number:
-     part.part_number||'',
-    description:
-     part.description||'Part',
-    quantity:1,
-    unit_price:
-     Number(part.price||0)
-   })
-   .select()
-   .single();
+    .from('ticket_parts')
+    .insert({
+      ticket_id:form.id,
+      part_number:part.part_number||'',
+      description:part.description||'',
+      quantity:1,
+      unit_price:Number(part.price||0)
+    })
+    .select()
+    .single();
 
   if(r.error){
-   setError(r.error.message);
-   return;
+    setError(r.error.message);
+    return;
   }
 
-  setParts(prev=>
-   [...prev,r.data]
+  const newStock=currentStock-1;
+
+  const stockUpdate=await sb
+    .from('parts_catalog')
+    .update({
+      quantity_on_hand:newStock
+    })
+    .eq('id',part.id);
+
+  if(stockUpdate.error){
+    // Undo the ticket part if inventory could not be updated.
+    await sb
+      .from('ticket_parts')
+      .delete()
+      .eq('id',r.data.id);
+
+    setError(stockUpdate.error.message);
+    return;
+  }
+
+  setParts(prev=>[
+    ...prev,
+    r.data
+  ]);
+
+  setCatalog(prev=>
+    prev.map(x=>
+      String(x.id)===String(part.id)
+        ? {...x,quantity_on_hand:newStock}
+        : x
+    )
   );
 
   setCatalogPartId('');
- }
+}
 
  async function addLabor(){
 
@@ -2267,25 +2297,105 @@ function TicketForm({
  async function updatePart(
   id,
   changes
- ){
-
-  setParts(prev=>
-   prev.map(p=>
-    p.id===id
-     ?{...p,...changes}
-     :p
-   )
+){
+  const oldPart=parts.find(
+    p=>String(p.id)===String(id)
   );
 
-  const r=await sb
-   .from('ticket_parts')
-   .update(changes)
-   .eq('id',id);
-
-  if(r.error){
-   setError(r.error.message);
+  if(!oldPart){
+    return;
   }
- }
+
+  const oldQty=Number(oldPart.quantity||0);
+  const newQty=
+    changes.quantity!==undefined
+      ? Number(changes.quantity)
+      : oldQty;
+
+  if(newQty<1){
+    alert('Quantity must be at least 1.');
+    return;
+  }
+
+  const catalogPart=catalog.find(
+    c=>
+      String(c.part_number||'').trim().toLowerCase()===
+      String(oldPart.part_number||'').trim().toLowerCase()
+  );
+
+  const qtyDifference=newQty-oldQty;
+
+  if(catalogPart && qtyDifference!==0){
+    const currentStock=Number(
+      catalogPart.quantity_on_hand||0
+    );
+
+    const newStock=currentStock-qtyDifference;
+
+    if(newStock<0){
+      alert(
+        `Not enough stock. Only ${currentStock} available.`
+      );
+      return;
+    }
+
+    const stockResult=await sb
+      .from('parts_catalog')
+      .update({
+        quantity_on_hand:newStock
+      })
+      .eq('id',catalogPart.id);
+
+    if(stockResult.error){
+      setError(stockResult.error.message);
+      return;
+    }
+
+    const r=await sb
+      .from('ticket_parts')
+      .update(changes)
+      .eq('id',id);
+
+    if(r.error){
+      // Restore inventory if the ticket update fails.
+      await sb
+        .from('parts_catalog')
+        .update({
+          quantity_on_hand:currentStock
+        })
+        .eq('id',catalogPart.id);
+
+      setError(r.error.message);
+      return;
+    }
+
+    setCatalog(prev=>
+      prev.map(c=>
+        String(c.id)===String(catalogPart.id)
+          ? {...c,quantity_on_hand:newStock}
+          : c
+      )
+    );
+  }else{
+    const r=await sb
+      .from('ticket_parts')
+      .update(changes)
+      .eq('id',id);
+
+    if(r.error){
+      setError(r.error.message);
+      return;
+    }
+  }
+
+  setParts(prev=>
+    prev.map(p=>
+      String(p.id)===String(id)
+        ? {...p,...changes}
+        : p
+    )
+  );
+}
 
  async function updateLabor(
   id,
@@ -2311,26 +2421,68 @@ function TicketForm({
  }
 
  async function deletePart(id){
+  const part=parts.find(
+    p=>String(p.id)===String(id)
+  );
+
+  if(!part){
+    return;
+  }
+
+  const catalogPart=catalog.find(
+    c=>
+      String(c.part_number||'').trim().toLowerCase()===
+      String(part.part_number||'').trim().toLowerCase()
+  );
 
   const r=await sb
-   .from('ticket_parts')
-   .delete()
-   .eq('id',id);
+    .from('ticket_parts')
+    .delete()
+    .eq('id',id);
 
   if(r.error){
-
-   setError(r.error.message);
-
-  }else{
-
-   setParts(prev=>
-    prev.filter(
-     p=>p.id!==id
-    )
-   );
-
+    setError(r.error.message);
+    return;
   }
- }
+
+  if(catalogPart){
+    const currentStock=Number(
+      catalogPart.quantity_on_hand||0
+    );
+
+    const returnQty=Number(
+      part.quantity||0
+    );
+
+    const newStock=currentStock+returnQty;
+
+    const stockResult=await sb
+      .from('parts_catalog')
+      .update({
+        quantity_on_hand:newStock
+      })
+      .eq('id',catalogPart.id);
+
+    if(stockResult.error){
+      setError(stockResult.error.message);
+      return;
+    }
+
+    setCatalog(prev=>
+      prev.map(c=>
+        String(c.id)===String(catalogPart.id)
+          ? {...c,quantity_on_hand:newStock}
+          : c
+      )
+    );
+  }
+
+  setParts(prev=>
+    prev.filter(
+      p=>String(p.id)!==String(id)
+    )
+  );
+}
 
  async function deleteLabor(id){
 
