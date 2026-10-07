@@ -10,8 +10,11 @@ const sb=createClient(
 
 const statuses=[
  'NEW','DIAGNOSING','WAITING FOR APPROVAL','WAITING FOR PARTS',
- 'REPAIRING','READY FOR PICKUP','COMPLETED'
+ 'REPAIRING','READY FOR PICKUP','PENDING DELIVERY','COMPLETED'
 ];
+
+const commonEquipmentBrands=['Ariens','Bad Boy','BigDog','Bobcat','Craftsman','Cub Cadet','Exmark','Ferris','Gravely','Husqvarna','Hustler','John Deere','Kubota','Scag','Simplicity','Snapper','Toro','Troy-Bilt','Walker'];
+const commonEngineBrands=['Briggs & Stratton','Honda','Kawasaki','Kohler','Kubota','Tecumseh','Vanguard','Yamaha'];
 
 const approvals=[
  'PENDING','APPROVED','DECLINED','NOT_REQUIRED'
@@ -25,7 +28,7 @@ const blankCatalogPart={
  part_number:'',
  description:'',
  price:'',
- notes:''
+ notes:'',quantity_on_hand:0,cost:0,supplier:'',bin_location:'',low_stock_level:0
 };
 
 const blankEquipment={
@@ -52,10 +55,14 @@ const blankTicket={
  technician_notes:'',
  pickup_delivery_details:'',
  pickup_delivery_cost:0,
+ pickup_date:'',
+ pickup_time:'',
+ delivery_date:'',
+ delivery_time:'',
  status:'NEW',
  tax_rate:0,
  archived:false,
- archived_at:null
+ archived_at:null,transport_status:'',pickup_delivery_type:'',handoff_completed_at:null
 };
 
 const money=n=>Number(n||0).toLocaleString(
@@ -137,6 +144,8 @@ function App(){
  const [equipment,setEquipment]=useState([]);
  const [tickets,setTickets]=useState([]);
  const [partsCatalog,setPartsCatalog]=useState([]);
+ const [schedule,setSchedule]=useState([]);
+ const [communications,setCommunications]=useState([]);
  const [loading,setLoading]=useState(true);
  const [q,setQ]=useState('');
  const [modal,setModal]=useState(null);
@@ -184,6 +193,8 @@ function App(){
    .on('postgres_changes',{event:'*',schema:'public',table:'ticket_parts'},refresh)
    .on('postgres_changes',{event:'*',schema:'public',table:'ticket_labor'},refresh)
    .on('postgres_changes',{event:'*',schema:'public',table:'parts_catalog'},refresh)
+   .on('postgres_changes',{event:'*',schema:'public',table:'schedule'},refresh)
+   .on('postgres_changes',{event:'*',schema:'public',table:'customer_communications'},refresh)
    .subscribe();
 
   // iPhones can pause WebSocket connections when the app is backgrounded.
@@ -220,7 +231,7 @@ function App(){
 
   if(showSpinner)setLoading(true);
 
-  const [c,e,t,p]=await Promise.all([
+  const [c,e,t,p,sc,cm]=await Promise.all([
 
    sb.from('customers')
     .select('*')
@@ -236,11 +247,14 @@ function App(){
 
    sb.from('parts_catalog')
     .select('*')
-    .order('part_number')
+    .order('part_number'),
+
+    sb.from('schedule').select('*').order('scheduled_date',{ascending:true}),
+    sb.from('customer_communications').select('*').order('created_at',{ascending:false})
 
   ]);
 
-  const err=c.error||e.error||t.error||p.error;
+  const err=c.error||e.error||t.error||p.error||sc.error||cm.error;
 
   if(err)setError(err.message);
 
@@ -248,6 +262,8 @@ function App(){
   setEquipment(e.data||[]);
   setTickets(t.data||[]);
   setPartsCatalog(p.data||[]);
+   setSchedule(sc.data||[]);
+   setCommunications(cm.data||[]);
 
   if(showSpinner)setLoading(false);
  }
@@ -266,6 +282,9 @@ function App(){
 
   if(table==='parts_catalog'){
    if(clean.price==='' || clean.price==null) clean.price=0;
+    if(clean.cost==='' || clean.cost==null) clean.cost=0;
+    if(clean.quantity_on_hand==='' || clean.quantity_on_hand==null) clean.quantity_on_hand=0;
+    if(clean.low_stock_level==='' || clean.low_stock_level==null) clean.low_stock_level=0;
   }
 
   const r=await sb
@@ -371,33 +390,13 @@ function App(){
    t=>t.archived
   );
 
- const filteredTickets=
-  activeTickets.filter(t=>
-   search({
-    ...t,
-    customer:customerName(
-     t.customer_id
-    ),
-    equipment:equipmentName(
-     t.equipment_id
-    )
-   })
-  );
-
- const filteredArchivedTickets=
-  archivedTickets.filter(t=>
-   search({
-    ...t,
-    customer:customerName(
-     t.customer_id
-    ),
-    equipment:equipmentName(
-     t.equipment_id
-    )
-   })
-  );
-
- if(!session){
+ const ticketSearchRecord=t=>{
+  const c=customers.find(x=>x.id===t.customer_id)||{};
+  const e=equipment.find(x=>x.id===t.equipment_id)||{};
+  return {...t,...c,equipment_type:e.equipment_type,manufacturer:e.manufacturer,equipment_model:e.model,serial_number:e.serial_number,engine:e.engine,engine_model:e.engine_model};
+ };
+ const filteredTickets=activeTickets.filter(t=>search(ticketSearchRecord(t)));
+ const filteredArchivedTickets=archivedTickets.filter(t=>search(ticketSearchRecord(t))); if(!session){
 
   return <Login
    error={error}
@@ -432,6 +431,7 @@ function App(){
     'Equipment',
     'Parts',
     'Tickets',
+    'Schedule',
     'Filed Tickets'
    ].map(x=>
 
@@ -777,7 +777,7 @@ function App(){
           </small>
 
           <small>
-           Price: {money(p.price)}
+           Price: {money(p.price)} · Stock: {p.quantity_on_hand??0}{Number(p.quantity_on_hand||0)<=Number(p.low_stock_level||0)?' · LOW STOCK':''}
           </small>
 
          </div>
@@ -867,6 +867,18 @@ function App(){
       </section>
 
      </>}
+
+     {tab==='Schedule'&&
+      <SchedulePage
+       schedule={schedule}
+       customers={customers}
+       equipment={equipment}
+       tickets={tickets}
+       setError={setError}
+       setNotice={setNotice}
+       reload={load}
+      />
+     }
 
      {tab==='Filed Tickets'&&<>
 
@@ -967,6 +979,7 @@ function App(){
       setForm={setForm}
       save={save}
       customers={customers}
+       equipment={equipment}
      />
     }
 
@@ -987,6 +1000,9 @@ function App(){
       equipment={equipment}
       setEquipment={setEquipment}
       partsCatalog={partsCatalog}
+      setPartsCatalog={setPartsCatalog}
+      communications={communications}
+      setCommunications={setCommunications}
       setTickets={setTickets}
       setError={setError}
       setNotice={setNotice}
@@ -1500,6 +1516,12 @@ function PartForm({
    type="number"
   />
 
+  <Field l="Quantity On Hand" k="quantity_on_hand" f={form} s={setForm} type="number" />
+  <Field l="Cost" k="cost" f={form} s={setForm} type="number" />
+  <Field l="Supplier" k="supplier" f={form} s={setForm} />
+  <Field l="Bin / Shelf Location" k="bin_location" f={form} s={setForm} />
+  <Field l="Low Stock Alert At" k="low_stock_level" f={form} s={setForm} type="number" />
+
   <Field
    l="Notes"
    k="notes"
@@ -1532,7 +1554,8 @@ function EquipmentForm({
  form,
  setForm,
  save,
- customers
+ customers,
+ equipment
 }){
 
  return <div className="form">
@@ -1559,12 +1582,7 @@ function EquipmentForm({
    s={setForm}
   />
 
-  <Field
-   l="Manufacturer"
-   k="manufacturer"
-   f={form}
-   s={setForm}
-  />
+  <SuggestField l="Manufacturer" k="manufacturer" f={form} s={setForm} opts={[...new Set([...commonEquipmentBrands,...equipment.map(x=>x.manufacturer).filter(Boolean)])].sort()} />
 
   <Field
    l="Model"
@@ -1580,12 +1598,7 @@ function EquipmentForm({
    s={setForm}
   />
 
-  <Field
-   l="Engine"
-   k="engine"
-   f={form}
-   s={setForm}
-  />
+  <SuggestField l="Engine" k="engine" f={form} s={setForm} opts={[...new Set([...commonEngineBrands,...equipment.map(x=>x.engine).filter(Boolean)])].sort()} />
 
   <Field
    l="Engine Model"
@@ -1624,6 +1637,9 @@ function TicketForm({
  equipment,
  setEquipment,
  partsCatalog,
+ setPartsCatalog,
+ communications,
+ setCommunications,
  setTickets,
  setError,
  setNotice,
@@ -1931,9 +1947,20 @@ function TicketForm({
 
   const clean={...form};
 
-  if(clean.estimate===''){
-   clean.estimate=null;
-  }
+  // Pickup/delivery date/time are Schedule helpers, not ticket-table columns.
+  const pickupDate=clean.pickup_date;
+  const pickupTime=clean.pickup_time;
+  const deliveryDate=clean.delivery_date;
+  const deliveryTime=clean.delivery_time;
+  delete clean.pickup_date;
+  delete clean.pickup_time;
+  delete clean.delivery_date;
+  delete clean.delivery_time;
+
+  if(clean.equipment_id==='') clean.equipment_id=null;
+  if(clean.estimate==='') clean.estimate=null;
+  if(clean.tax_rate==='' || clean.tax_rate==null) clean.tax_rate=0;
+  if(clean.pickup_delivery_cost==='' || clean.pickup_delivery_cost==null) clean.pickup_delivery_cost=0;
 
   const r=await sb
    .from('tickets')
@@ -1941,19 +1968,91 @@ function TicketForm({
    .select()
    .single();
 
-  setSaving(false);
-
   if(r.error){
-
+   setSaving(false);
    setError(r.error.message);
-
    return;
   }
+
+  const customer=customers.find(c=>c.id===r.data.customer_id);
+
+  async function syncScheduledStop(scheduleType,scheduledDate,scheduledTime){
+   // If this helper was never loaded/edited, leave any existing schedule alone.
+   if(scheduledDate===undefined) return null;
+
+   const existing=await sb
+    .from('schedule')
+    .select('id,status')
+    .eq('ticket_id',r.data.id)
+    .eq('schedule_type',scheduleType)
+    .eq('status','SCHEDULED');
+
+   if(existing.error) return existing.error;
+
+   if(!scheduledDate){
+    if(existing.data?.length){
+     const ids=existing.data.map(x=>x.id);
+     const removed=await sb.from('schedule').delete().in('id',ids);
+     if(removed.error) return removed.error;
+    }
+    return null;
+   }
+
+   const sameDay=await sb
+    .from('schedule')
+    .select('id')
+    .eq('schedule_type',scheduleType)
+    .eq('scheduled_date',scheduledDate)
+    .eq('status','SCHEDULED');
+   if(sameDay.error) return sameDay.error;
+   const existingIds=new Set((existing.data||[]).map(x=>x.id));
+   const sameDayCount=(sameDay.data||[]).filter(x=>!existingIds.has(x.id)).length;
+
+   let limitOverride=false;
+   if(sameDayCount>=2){
+    limitOverride=confirm(`${scheduleType==='PICKUP'?'Pickup':'Delivery'} limit reached for ${scheduledDate} — 2 of 2 scheduled. Override daily limit?`);
+    if(!limitOverride) return new Error('Schedule limit not overridden. Ticket was saved, but the stop was not scheduled.');
+   }
+
+   const payload={
+    ticket_id:r.data.id,
+    customer_id:r.data.customer_id,
+    equipment_id:r.data.equipment_id||null,
+    schedule_type:scheduleType,
+    scheduled_date:scheduledDate,
+    scheduled_time:scheduledTime||null,
+    address:customer?.address||'',
+    city:customer?.city||'',
+    limit_override:limitOverride
+   };
+
+   if(existing.data?.length){
+    const updated=await sb.from('schedule').update(payload).eq('id',existing.data[0].id);
+    if(updated.error) return updated.error;
+    if(existing.data.length>1){
+     const extras=existing.data.slice(1).map(x=>x.id);
+     const removed=await sb.from('schedule').delete().in('id',extras);
+     if(removed.error) return removed.error;
+    }
+   }else{
+    const inserted=await sb.from('schedule').insert(payload);
+    if(inserted.error) return inserted.error;
+   }
+   return null;
+  }
+
+  const pickupScheduleError=await syncScheduledStop('PICKUP',pickupDate,pickupTime);
+  const deliveryScheduleError=await syncScheduledStop('DELIVERY',deliveryDate,deliveryTime);
+
+  setSaving(false);
+
+  const scheduleError=pickupScheduleError||deliveryScheduleError;
+  if(scheduleError) setError(scheduleError.message);
 
   const wasExisting=
    Boolean(form.id);
 
-  setForm(r.data);
+  setForm({...r.data,pickup_date:pickupDate??'',pickup_time:pickupTime??'',delivery_date:deliveryDate??'',delivery_time:deliveryTime??''});
 
   setTickets(prev=>{
 
@@ -2318,6 +2417,97 @@ function TicketForm({
    );
 
   }
+ }
+
+ async function addCommunication(communicationType){
+  if(!form.id){
+   alert('Save the ticket first.');
+   return;
+  }
+
+  const r=await sb
+   .from('customer_communications')
+   .insert({
+    ticket_id:form.id,
+    customer_id:form.customer_id||null,
+    communication_type:communicationType
+   })
+   .select()
+   .single();
+
+  if(r.error){
+   setError(r.error.message);
+   return;
+  }
+
+  setCommunications(prev=>[r.data,...(prev||[])]);
+  setNotice('Customer communication logged');
+  setTimeout(()=>setNotice(''),2000);
+ }
+
+ function printInvoice(){
+  const customer=customers.find(c=>c.id===form.customer_id);
+  const machine=equipment.find(e=>e.id===form.equipment_id);
+  const esc=v=>String(v??'').replace(/[&<>"]/g,ch=>({
+   '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'
+  }[ch]));
+
+  const partsRows=parts.map(p=>`
+   <tr>
+    <td>${esc(p.part_number)}</td>
+    <td>${esc(p.description)}</td>
+    <td>${esc(p.quantity)}</td>
+    <td>${money(p.unit_price)}</td>
+    <td>${money(Number(p.quantity||0)*Number(p.unit_price||0))}</td>
+   </tr>`).join('');
+
+  const laborRows=labor.map(l=>`
+   <tr>
+    <td colspan="2">${esc(l.description)}</td>
+    <td>${esc(l.hours)}</td>
+    <td>${money(l.hourly_rate)}</td>
+    <td>${money(Number(l.hours||0)*Number(l.hourly_rate||0))}</td>
+   </tr>`).join('');
+
+  const html=`<!doctype html><html><head><title>JeffCo Invoice #${esc(form.ticket_number||'')}</title>
+   <style>
+    body{font-family:Arial,sans-serif;padding:28px;color:#111}
+    h1{margin:0}.muted{color:#666}table{width:100%;border-collapse:collapse;margin-top:18px}
+    th,td{padding:8px;border-bottom:1px solid #ddd;text-align:left}
+    .totals{margin-left:auto;margin-top:20px;width:320px}
+    .totals div{display:flex;justify-content:space-between;padding:5px 0}
+    .grand{font-size:20px;font-weight:bold;border-top:2px solid #111;margin-top:5px;padding-top:10px}
+    @media print{button{display:none}}
+   </style></head><body>
+   <h1>JeffCo Lawn Mower Repair</h1>
+   <div class="muted">Repair Invoice · Ticket #${esc(form.ticket_number||'New')}</div>
+   <h3>${esc(customer?.name||'Customer')}</h3>
+   <div>${esc(customer?.phone||'')}</div>
+   <div>${esc([customer?.address,customer?.city].filter(Boolean).join(', '))}</div>
+   <p><b>Equipment:</b> ${esc([machine?.manufacturer,machine?.model].filter(Boolean).join(' ')||machine?.equipment_type||'')}</p>
+   <p><b>Customer Issue:</b> ${esc(form.customer_issue||'')}</p>
+   <p><b>Work Performed:</b> ${esc(form.work_performed||'')}</p>
+   <table><thead><tr><th>Part #</th><th>Description</th><th>Qty/Hrs</th><th>Rate</th><th>Total</th></tr></thead>
+   <tbody>${partsRows}${laborRows}</tbody></table>
+   <div class="totals">
+    <div><span>Parts</span><b>${money(partsSubtotal)}</b></div>
+    <div><span>Labor</span><b>${money(laborSubtotal)}</b></div>
+    <div><span>Pickup & Delivery</span><b>${money(pickupDeliveryCost)}</b></div>
+    <div><span>Subtotal</span><b>${money(subtotal)}</b></div>
+    <div><span>Tax</span><b>${money(tax)}</b></div>
+    <div class="grand"><span>Total</span><b>${money(total)}</b></div>
+   </div>
+   <script>window.onload=()=>window.print();<\/script>
+   </body></html>`;
+
+  const w=window.open('','_blank');
+  if(!w){
+   alert('Allow pop-ups to print or save the invoice.');
+   return;
+  }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
  }
 
  const partsSubtotal=
@@ -2803,6 +2993,16 @@ function TicketForm({
     type="number"
    />
 
+   <div className="charge">
+    <Field l="Pickup Date" k="pickup_date" f={form} s={setForm} type="date" />
+    <Field l="Pickup Time" k="pickup_time" f={form} s={setForm} type="time" />
+   </div>
+
+   <div className="charge">
+    <Field l="Delivery Date" k="delivery_date" f={form} s={setForm} type="date" />
+    <Field l="Delivery Time" k="delivery_time" f={form} s={setForm} type="time" />
+   </div>
+
   </section>
 
   <Select
@@ -2910,7 +3110,8 @@ function TicketForm({
 
       <input
        type="number"
-       step="0.01"
+       step="1"
+       min="1"
        placeholder="Qty"
        value={p.quantity}
        disabled={form.archived}
@@ -3206,6 +3407,10 @@ function TicketForm({
 
    </div>
 
+   <section className="intakebox"><div className="sectionhead"><h3>Customer Communication</h3></div>{!form.archived&&<div className="rowactions">{['CALLED CUSTOMER','LEFT VOICEMAIL','ESTIMATE APPROVED','ESTIMATE DECLINED','CUSTOMER NOTIFIED READY'].map(type=><button className="small" key={type} onClick={()=>addCommunication(type)}>{type}</button>)}</div>}{(communications||[]).filter(x=>x.ticket_id===form.id).slice(0,8).map(x=><small key={x.id}>{new Date(x.created_at).toLocaleString()} · {x.communication_type}</small>)}</section>
+
+   <button className="small" onClick={printInvoice}>Print / Save Invoice PDF</button>
+
    <Field
     l="Technician Notes"
     k="technician_notes"
@@ -3269,6 +3474,71 @@ function TicketForm({
   </>}
 
  </div>;
+}
+
+function SuggestField({l,k,f,s,opts}){
+ const id=`list-${k}`; return <label>{l}<input list={id} value={f[k]||''} onChange={e=>s({...f,[k]:e.target.value})}/><datalist id={id}>{opts.map(x=><option key={x} value={x}/>)}</datalist></label>;
+}
+
+function SchedulePage({schedule,customers,equipment,tickets,setError,setNotice,reload}){
+ const today=new Date().toISOString().slice(0,10);
+ const [date,setDate]=useState(today),[type,setType]=useState('PICKUP'),[customerId,setCustomerId]=useState(''),[ticketId,setTicketId]=useState(''),[time,setTime]=useState(''),[notes,setNotes]=useState('');
+ const day=schedule.filter(x=>x.scheduled_date===date&&x.status!=='CANCELLED');
+ const activeDay=day.filter(x=>x.status==='SCHEDULED');
+ const pickups=activeDay.filter(x=>x.schedule_type==='PICKUP');
+ const deliveries=activeDay.filter(x=>x.schedule_type==='DELIVERY');
+ const upcoming=schedule.filter(x=>x.status==='SCHEDULED'&&x.scheduled_date>=today).sort((a,b)=>`${a.scheduled_date} ${a.scheduled_time||''}`.localeCompare(`${b.scheduled_date} ${b.scheduled_time||''}`));
+ const cname=id=>customers.find(x=>x.id===id)?.name||'Customer';
+ const selectedCustomer=customers.find(x=>x.id===customerId);
+ async function add(){
+  if(!customerId){alert('Select a customer.');return;}
+  const count=type==='PICKUP'?pickups.length:deliveries.length;
+  let override=false;
+  if(count>=2){override=confirm(`${type==='PICKUP'?'Pickup':'Delivery'} limit reached for ${date} — 2 of 2 scheduled. Override daily limit?`);if(!override)return;}
+  const t=tickets.find(x=>x.id===ticketId),e=t?equipment.find(x=>x.id===t.equipment_id):null;
+  const r=await sb.from('schedule').insert({ticket_id:ticketId||null,customer_id:customerId,equipment_id:e?.id||null,schedule_type:type,scheduled_date:date,scheduled_time:time||null,address:selectedCustomer?.address||'',city:selectedCustomer?.city||'',notes,limit_override:override}).select().single();
+  if(r.error){setError(r.error.message);return;}
+  setNotice('Scheduled');setTimeout(()=>setNotice(''),2000);await reload(false);
+ }
+ async function complete(x){
+  const status=x.schedule_type==='PICKUP'?'PICKED_UP':'DELIVERED',now=new Date().toISOString();
+  const r=await sb.from('schedule').update({status,completed_at:now}).eq('id',x.id);
+  if(r.error){setError(r.error.message);return;}
+  if(x.ticket_id){
+   const tr=x.schedule_type==='PICKUP'
+    ? await sb.from('tickets').update({transport_status:'PICKED_UP'}).eq('id',x.ticket_id)
+    : await sb.from('tickets').update({transport_status:'DELIVERED',handoff_completed_at:now,archived:true,archived_at:now,status:'COMPLETED'}).eq('id',x.ticket_id);
+   if(tr.error){setError(tr.error.message);return;}
+  }
+  await reload(false);
+ }
+ async function deleteSchedule(x){
+  if(!confirm('Delete this scheduled pickup/delivery?'))return;
+  const r=await sb.from('schedule').delete().eq('id',x.id);
+  if(r.error){setError(r.error.message);return;}
+  setNotice('Scheduled item deleted');setTimeout(()=>setNotice(''),2000);await reload(false);
+ }
+ function route(x){
+  const a=[x.address,x.city].filter(Boolean).join(', ');
+  if(!a){alert('No customer address saved.');return;}
+  window.open(`https://maps.apple.com/?daddr=${encodeURIComponent(a)}&dirflg=d`,'_blank');
+ }
+ function routeDay(){
+  const stops=activeDay.filter(x=>x.address);
+  if(!stops.length){alert('No scheduled addresses for this day.');return;}
+  // Apple Maps web links support a single destination reliably. Open the first stop;
+  // each remaining stop still has its own Navigate button below.
+  route(stops[0]);
+ }
+ const waiting=tickets.filter(t=>!t.archived&&t.pickup_delivery_type==='PICKUP'&&(!t.transport_status||t.transport_status==='WAITING_FOR_PICKUP'));
+ const stopRow=(x,keyPrefix='')=><div className="row" key={`${keyPrefix}${x.id}`}><div><b>{keyPrefix?`${x.scheduled_date} · `:''}{x.schedule_type} · {cname(x.customer_id)}</b><small>{x.scheduled_time||'No time'} · {[x.address,x.city].filter(Boolean).join(', ')||'No address'}</small><small>{x.status}{x.limit_override?' · LIMIT OVERRIDE':''}{x.notes?` · ${x.notes}`:''}</small></div><div className="rowactions"><button className="small" onClick={()=>route(x)}>Navigate</button>{x.status==='SCHEDULED'&&<button className="small" onClick={()=>complete(x)}>{x.schedule_type==='PICKUP'?'Picked Up':'Delivered'}</button>}{x.status==='SCHEDULED'&&<button className="small danger" onClick={()=>deleteSchedule(x)}>Delete</button>}</div></div>;
+ return <>
+  <div className="top"><div><h2>Schedule</h2><p className="muted">Pickups {pickups.length}/2 · Deliveries {deliveries.length}/2</p></div><button onClick={routeDay}>Navigate First Stop</button></div>
+  <section className="panel"><div className="form"><Field l="Date" k="date" f={{date}} s={x=>setDate(x.date)} type="date"/><label>Type<select value={type} onChange={e=>setType(e.target.value)}><option>PICKUP</option><option>DELIVERY</option></select></label><label>Customer<select value={customerId} onChange={e=>setCustomerId(e.target.value)}><option value="">Select…</option>{customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label>Ticket<select value={ticketId} onChange={e=>setTicketId(e.target.value)}><option value="">Optional…</option>{tickets.filter(t=>!t.archived&&(!customerId||t.customer_id===customerId)).map(t=><option key={t.id} value={t.id}>#{t.ticket_number}</option>)}</select></label><Field l="Time" k="time" f={{time}} s={x=>setTime(x.time)} type="time"/><Field l="Notes" k="notes" f={{notes}} s={x=>setNotes(x.notes)} area/><button onClick={add}>Add to Schedule</button></div></section>
+  <section className="panel"><h3>{date} — Scheduled Stops</h3>{!day.length&&<div className="empty">Nothing scheduled.</div>}{day.map(x=>stopRow(x))}</section>
+  <section className="panel"><h3>All Upcoming Pickups and Deliveries</h3>{!upcoming.length&&<div className="empty">No upcoming pickups or deliveries.</div>}{upcoming.map(x=>stopRow(x,'upcoming-'))}</section>
+  {waiting.length>0&&<section className="panel"><h3>Waiting for Pickup</h3>{waiting.map(t=><div className="row" key={t.id}><div><b>Ticket #{t.ticket_number} · {cname(t.customer_id)}</b><small>Not yet picked up</small></div></div>)}</section>}
+ </>;
 }
 
 function Field({
