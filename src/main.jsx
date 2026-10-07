@@ -2249,7 +2249,7 @@ function TicketForm({
     r.data
   ]);
 
-  setCatalog(prev=>
+  setPartsCatalog(prev=>
     prev.map(x=>
       String(x.id)===String(part.id)
         ? {...x,quantity_on_hand:newStock}
