@@ -2523,8 +2523,8 @@ function TicketForm({
    const html=`<!doctype html><html><head><meta charset="utf-8"><title>JeffCo ${isInvoice?'Invoice':'Repair Ticket'} #${esc(form.ticket_number||'New')}</title>
     <style>
      *{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;margin:0;padding:26px;color:#171717;font-size:12px;line-height:1.45}
-     .masthead{display:flex;align-items:center;gap:20px;background:#111;color:#fff;padding:15px 18px;border-bottom:6px solid #8ac83f}
-     .logo{width:115px;height:115px;object-fit:contain;flex-shrink:0}.shop h1{font-size:23px;margin:0 0 5px}.shop p{margin:3px 0}.green{color:#9bd64d}
+     .masthead{display:flex;align-items:center;justify-content:center;background:#111;padding:14px 18px;border-bottom:6px solid #8ac83f}
+     .logo{display:block;width:210px;max-width:100%;height:auto;object-fit:contain}
      .docline{display:flex;justify-content:space-between;align-items:center;gap:10px;border-bottom:2px solid #8ac83f;padding:15px 0 12px}
      .docline h2{font-size:20px;margin:0}.muted{color:#555}.twocol{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:17px 0}
      .panel{border:1px solid #ddd;padding:12px 14px;break-inside:avoid}.panel h3{margin:0 0 8px;color:#477c1c;font-size:13px;text-transform:uppercase;letter-spacing:.5px}
@@ -2537,13 +2537,13 @@ function TicketForm({
      @page{size:auto;margin:12mm}@media print{body{padding:0}.printbar{display:none}.masthead{-webkit-print-color-adjust:exact;print-color-adjust:exact}th{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
     </style></head><body>
     <div class="printbar"><button onclick="window.print()">Print / Save PDF</button></div>
-    <header class="masthead"><img class="logo" src="${JEFFCO_PRINT_LOGO}" alt="JeffCo Lawn Mower Repair logo"><div class="shop"><h1>JeffCo Lawn Mower Repair</h1><p class="green"><strong>Veteran Owned and Operated</strong></p><p><strong>636-282-1347</strong></p></div></header>
+    <header class="masthead"><img class="logo" src="${JEFFCO_PRINT_LOGO}" alt="JeffCo Lawn Mower Repair logo"></header>
     <div class="docline"><h2>${isInvoice?'REPAIR INVOICE':'REPAIR TICKET'}</h2><div><strong>Ticket #${esc(form.ticket_number||'New')}</strong><div class="muted">Printed ${esc(new Date().toLocaleDateString())}</div></div></div>
     <div class="twocol"><section class="panel"><h3>Customer</h3>${detail('Name',customer?.name||'Customer')}${detail('Phone',customer?.phone)}${detail('Address',[customer?.address,customer?.city].filter(Boolean).join(', '))}</section>
     <section class="panel"><h3>Equipment</h3>${detail('Equipment',equipmentLabel)}${detail('Type',machine?.equipment_type)}${detail('Serial Number',machine?.serial_number)}${detail('Engine',[machine?.engine,machine?.engine_model].filter(Boolean).join(' '))}${detail('Repair Status',form.status)}</section></div>
     <section class="work"><h2>Repair Details</h2>${detail('Customer Reported Issue',form.customer_issue)}${detail('Diagnosis',form.diagnosis)}${detail('Additional Work',form.additional_work)}${detail('Work Performed',form.work_performed)}${detail('Pickup / Delivery Details',form.pickup_delivery_details)}${!isInvoice?detail('Parts Needed',form.parts_needed):''}</section>
     ${charges}
-    <footer class="footer">JeffCo Lawn Mower Repair · Veteran Owned and Operated · 636-282-1347</footer>
+    
     </body></html>`;
    const w=window.open('','_blank');
    if(!w){alert('Allow pop-ups to print or save this document.');return;}
