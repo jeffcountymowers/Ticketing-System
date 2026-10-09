@@ -3534,6 +3534,9 @@ function SchedulePage({schedule,customers,equipment,tickets,setError,setNotice,r
  const today=new Date().toISOString().slice(0,10);
  const [date,setDate]=useState(today),[type,setType]=useState('PICKUP'),[customerId,setCustomerId]=useState(''),[ticketId,setTicketId]=useState(''),[time,setTime]=useState(''),[notes,setNotes]=useState('');
  const [routeProgress,setRouteProgress]=useState(null);
+ const [showNewCustomer,setShowNewCustomer]=useState(false);
+ const [newCustomer,setNewCustomer]=useState({...blankCustomer});
+ const [creatingCustomer,setCreatingCustomer]=useState(false);
  const day=schedule.filter(x=>x.scheduled_date===date&&x.status!=='CANCELLED');
  const activeDay=day.filter(x=>x.status==='SCHEDULED');
  const pickups=activeDay.filter(x=>x.schedule_type==='PICKUP');
@@ -3541,6 +3544,22 @@ function SchedulePage({schedule,customers,equipment,tickets,setError,setNotice,r
  const upcoming=schedule.filter(x=>x.status==='SCHEDULED'&&x.scheduled_date>=today).sort((a,b)=>`${a.scheduled_date} ${a.scheduled_time||''}`.localeCompare(`${b.scheduled_date} ${b.scheduled_time||''}`));
  const cname=id=>customers.find(x=>x.id===id)?.name||'Customer';
  const selectedCustomer=customers.find(x=>x.id===customerId);
+ async function createScheduleCustomer(){
+  if(!newCustomer.name.trim()){alert('Enter the customer name.');return;}
+  if(creatingCustomer)return;
+  setCreatingCustomer(true);
+  setError('');
+  try{
+   const r=await sb.from('customers').insert({...newCustomer,name:newCustomer.name.trim()}).select().single();
+   if(r.error){setError(r.error.message);return;}
+   await reload(false);
+   setCustomerId(r.data.id);
+   setTicketId('');
+   setNewCustomer({...blankCustomer});
+   setShowNewCustomer(false);
+   setNotice('Customer added. You can now schedule the stop.');
+  }finally{setCreatingCustomer(false);}
+ }
  async function add(){
   if(!customerId){alert('Select a customer.');return;}
   const count=type==='PICKUP'?pickups.length:deliveries.length;
@@ -3615,7 +3634,7 @@ function SchedulePage({schedule,customers,equipment,tickets,setError,setNotice,r
  return <>
   <div className="top"><div><h2>Schedule</h2><p className="muted">Pickups {pickups.length}/2 · Deliveries {deliveries.length}/2</p></div><button onClick={routeDay}>Start Apple Maps Route</button></div>
   {currentRouteIndex>=0&&<section className="panel"><b>Apple Maps Route — Stop {currentRouteIndex+1} of {routeStops.length}</b><p className="muted">{cname(routeStops[currentRouteIndex].customer_id)} · {routeStops[currentRouteIndex].schedule_type} · {[routeStops[currentRouteIndex].address,routeStops[currentRouteIndex].city].filter(Boolean).join(', ')}</p><div className="rowactions"><button className="small" onClick={()=>openAppleStop(routeStops[currentRouteIndex])}>Reopen Current Stop</button>{currentRouteIndex<routeStops.length-1?<button onClick={nextRouteStop}>Next Stop in Apple Maps</button>:<button onClick={()=>setRouteProgress(null)}>Finish Route</button>}</div><small>Apple Maps navigates to one destination at a time. Return here after each stop to continue.</small></section>}
-  <section className="panel"><div className="form"><Field l="Date" k="date" f={{date}} s={x=>setDate(x.date)} type="date"/><label>Type<select value={type} onChange={e=>setType(e.target.value)}><option>PICKUP</option><option>DELIVERY</option></select></label><label>Customer<select value={customerId} onChange={e=>setCustomerId(e.target.value)}><option value="">Select…</option>{customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label>Ticket<select value={ticketId} onChange={e=>setTicketId(e.target.value)}><option value="">Optional…</option>{tickets.filter(t=>!t.archived&&(!customerId||t.customer_id===customerId)).map(t=><option key={t.id} value={t.id}>#{t.ticket_number}</option>)}</select></label><Field l="Time" k="time" f={{time}} s={x=>setTime(x.time)} type="time"/><Field l="Notes" k="notes" f={{notes}} s={x=>setNotes(x.notes)} area/><button onClick={add}>Add to Schedule</button></div></section>
+  <section className="panel"><div className="form"><Field l="Date" k="date" f={{date}} s={x=>setDate(x.date)} type="date"/><label>Type<select value={type} onChange={e=>setType(e.target.value)}><option>PICKUP</option><option>DELIVERY</option></select></label><label>Customer<select value={customerId} onChange={e=>{setCustomerId(e.target.value);setTicketId('');}}><option value="">Select…</option>{customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><button type="button" className="small" onClick={()=>setShowNewCustomer(v=>!v)}>{showNewCustomer?'Cancel New Customer':'+ Add New Customer'}</button>{showNewCustomer&&<div className="panel"><h3>New Customer</h3><div className="form"><Field l="Name" k="name" f={newCustomer} s={setNewCustomer}/><Field l="Phone" k="phone" f={newCustomer} s={setNewCustomer}/><Field l="Address" k="address" f={newCustomer} s={setNewCustomer}/><Field l="City" k="city" f={newCustomer} s={setNewCustomer}/><Field l="Notes" k="notes" f={newCustomer} s={setNewCustomer} area/><button type="button" disabled={creatingCustomer} onClick={createScheduleCustomer}>{creatingCustomer?'Saving…':'Save New Customer'}</button></div></div>}<label>Ticket<select value={ticketId} onChange={e=>setTicketId(e.target.value)}><option value="">Optional…</option>{tickets.filter(t=>!t.archived&&(!customerId||t.customer_id===customerId)).map(t=><option key={t.id} value={t.id}>#{t.ticket_number}</option>)}</select></label><Field l="Time" k="time" f={{time}} s={x=>setTime(x.time)} type="time"/><Field l="Notes" k="notes" f={{notes}} s={x=>setNotes(x.notes)} area/><button onClick={add}>Add to Schedule</button></div></section>
   <section className="panel"><h3>{date} — Scheduled Stops</h3>{!day.length&&<div className="empty">Nothing scheduled.</div>}{day.map(x=>stopRow(x))}</section>
   <section className="panel"><h3>All Upcoming Pickups and Deliveries</h3>{!upcoming.length&&<div className="empty">No upcoming pickups or deliveries.</div>}{upcoming.map(x=>stopRow(x,'upcoming-'))}</section>
   {waiting.length>0&&<section className="panel"><h3>Waiting for Pickup</h3>{waiting.map(t=><div className="row" key={t.id}><div><b>Ticket #{t.ticket_number} · {cname(t.customer_id)}</b><small>Not yet picked up</small></div></div>)}</section>}
