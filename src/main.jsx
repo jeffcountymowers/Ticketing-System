@@ -3531,6 +3531,7 @@ function SuggestField({l,k,f,s,opts}){
 function SchedulePage({schedule,customers,equipment,tickets,setError,setNotice,reload}){
  const today=new Date().toISOString().slice(0,10);
  const [date,setDate]=useState(today),[type,setType]=useState('PICKUP'),[customerId,setCustomerId]=useState(''),[ticketId,setTicketId]=useState(''),[time,setTime]=useState(''),[notes,setNotes]=useState('');
+ const [routeProgress,setRouteProgress]=useState(null);
  const day=schedule.filter(x=>x.scheduled_date===date&&x.status!=='CANCELLED');
  const activeDay=day.filter(x=>x.status==='SCHEDULED');
  const pickups=activeDay.filter(x=>x.schedule_type==='PICKUP');
@@ -3571,17 +3572,31 @@ function SchedulePage({schedule,customers,equipment,tickets,setError,setNotice,r
   if(!a){alert('No customer address saved.');return;}
   window.open(`https://maps.apple.com/?daddr=${encodeURIComponent(a)}&dirflg=d`,'_blank');
  }
+ const routeStops=activeDay
+  .filter(x=>[x.address,x.city].some(v=>String(v||'').trim()))
+  .sort((a,b)=>String(a.scheduled_time||'').localeCompare(String(b.scheduled_time||'')));
+ function openAppleStop(x){
+  const address=[x.address,x.city].filter(Boolean).join(', ');
+  window.open(`https://maps.apple.com/?daddr=${encodeURIComponent(address)}&dirflg=d`,'_blank','noopener,noreferrer');
+ }
  function routeDay(){
-  const stops=activeDay.filter(x=>x.address);
-  if(!stops.length){alert('No scheduled addresses for this day.');return;}
-  // Apple Maps web links support a single destination reliably. Open the first stop;
-  // each remaining stop still has its own Navigate button below.
-  route(stops[0]);
+  if(!routeStops.length){alert('No scheduled addresses for this day.');return;}
+  setRouteProgress({date,stopId:routeStops[0].id});
+  openAppleStop(routeStops[0]);
+ }
+ const currentRouteIndex=routeProgress?.date===date
+  ?routeStops.findIndex(x=>x.id===routeProgress.stopId):-1;
+ function nextRouteStop(){
+  if(currentRouteIndex<0||currentRouteIndex>=routeStops.length-1)return;
+  const next=routeStops[currentRouteIndex+1];
+  setRouteProgress({date,stopId:next.id});
+  openAppleStop(next);
  }
  const waiting=tickets.filter(t=>!t.archived&&t.pickup_delivery_type==='PICKUP'&&(!t.transport_status||t.transport_status==='WAITING_FOR_PICKUP'));
  const stopRow=(x,keyPrefix='')=><div className="row" key={`${keyPrefix}${x.id}`}><div><b>{keyPrefix?`${x.scheduled_date} · `:''}{x.schedule_type} · {cname(x.customer_id)}</b><small>{x.scheduled_time||'No time'} · {[x.address,x.city].filter(Boolean).join(', ')||'No address'}</small><small>{x.status}{x.limit_override?' · LIMIT OVERRIDE':''}{x.notes?` · ${x.notes}`:''}</small></div><div className="rowactions"><button className="small" onClick={()=>route(x)}>Navigate</button>{x.status==='SCHEDULED'&&<button className="small" onClick={()=>complete(x)}>{x.schedule_type==='PICKUP'?'Picked Up':'Delivered'}</button>}{x.status==='SCHEDULED'&&<button className="small danger" onClick={()=>deleteSchedule(x)}>Delete</button>}</div></div>;
  return <>
-  <div className="top"><div><h2>Schedule</h2><p className="muted">Pickups {pickups.length}/2 · Deliveries {deliveries.length}/2</p></div><button onClick={routeDay}>Navigate First Stop</button></div>
+  <div className="top"><div><h2>Schedule</h2><p className="muted">Pickups {pickups.length}/2 · Deliveries {deliveries.length}/2</p></div><button onClick={routeDay}>Start Apple Maps Route</button></div>
+  {currentRouteIndex>=0&&<section className="panel"><b>Apple Maps Route — Stop {currentRouteIndex+1} of {routeStops.length}</b><p className="muted">{cname(routeStops[currentRouteIndex].customer_id)} · {routeStops[currentRouteIndex].schedule_type} · {[routeStops[currentRouteIndex].address,routeStops[currentRouteIndex].city].filter(Boolean).join(', ')}</p><div className="rowactions"><button className="small" onClick={()=>openAppleStop(routeStops[currentRouteIndex])}>Reopen Current Stop</button>{currentRouteIndex<routeStops.length-1?<button onClick={nextRouteStop}>Next Stop in Apple Maps</button>:<button onClick={()=>setRouteProgress(null)}>Finish Route</button>}</div><small>Apple Maps navigates to one destination at a time. Return here after each stop to continue.</small></section>}
   <section className="panel"><div className="form"><Field l="Date" k="date" f={{date}} s={x=>setDate(x.date)} type="date"/><label>Type<select value={type} onChange={e=>setType(e.target.value)}><option>PICKUP</option><option>DELIVERY</option></select></label><label>Customer<select value={customerId} onChange={e=>setCustomerId(e.target.value)}><option value="">Select…</option>{customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label>Ticket<select value={ticketId} onChange={e=>setTicketId(e.target.value)}><option value="">Optional…</option>{tickets.filter(t=>!t.archived&&(!customerId||t.customer_id===customerId)).map(t=><option key={t.id} value={t.id}>#{t.ticket_number}</option>)}</select></label><Field l="Time" k="time" f={{time}} s={x=>setTime(x.time)} type="time"/><Field l="Notes" k="notes" f={{notes}} s={x=>setNotes(x.notes)} area/><button onClick={add}>Add to Schedule</button></div></section>
   <section className="panel"><h3>{date} — Scheduled Stops</h3>{!day.length&&<div className="empty">Nothing scheduled.</div>}{day.map(x=>stopRow(x))}</section>
   <section className="panel"><h3>All Upcoming Pickups and Deliveries</h3>{!upcoming.length&&<div className="empty">No upcoming pickups or deliveries.</div>}{upcoming.map(x=>stopRow(x,'upcoming-'))}</section>
