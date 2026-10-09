@@ -2369,7 +2369,24 @@ function TicketForm({
     // entry when another device has already saved this part.
     const existing=await sb.from('parts_catalog').select('id,part_number');
     if(existing.error)throw existing.error;
-    if((existing.data||[]).some(p=>String(p.part_number||'').trim().toLowerCase()===key))return;
+    const matching=(existing.data||[]).find(p=>String(p.part_number||'').trim().toLowerCase()===key);
+    if(matching){
+     // A part may have been created before its price was typed. Fill in a
+     // missing catalog price, but never overwrite an established price.
+     const current=await sb.from('parts_catalog').select('id,price').eq('id',matching.id).single();
+     if(current.error)throw current.error;
+     const enteredPrice=Number(part.unit_price||0);
+     if(Number(current.data.price||0)===0 && enteredPrice>0){
+      const updated=await sb.from('parts_catalog').update({price:enteredPrice}).eq('id',matching.id).eq('price',0).select();
+      if(updated.error)throw updated.error;
+      if(updated.data?.length){
+       setPartsCatalog(prev=>prev.map(p=>p.id===matching.id?{...p,price:enteredPrice}:p));
+       setNotice(`Inventory price saved for ${partNumber}`);
+       setTimeout(()=>setNotice(''),2500);
+      }
+     }
+     return;
+    }
 
     const result=await sb.from('parts_catalog').insert({
      part_number:partNumber,
