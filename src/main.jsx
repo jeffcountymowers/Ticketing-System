@@ -13,8 +13,8 @@ const statuses=[
  'REPAIRING','READY FOR PICKUP','PENDING DELIVERY','COMPLETED'
 ];
 
-const commonEquipmentBrands=['Ariens','Bad Boy','BigDog','Bobcat','Craftsman','Cub Cadet','Exmark','Ferris','Gravely','Husqvarna','Hustler','John Deere','Kubota','Scag','Simplicity','Snapper','Toro','Troy-Bilt','Walker'];
-const commonEngineBrands=['Briggs & Stratton','Honda','Kawasaki','Kohler','Kubota','Tecumseh','Vanguard','Yamaha'];
+const commonEquipmentBrands=['Ariens','Bad Boy','BigDog','Bobcat','Branson','Bush Hog','Case IH','Craftsman','Cub Cadet','Dixie Chopper','Echo','Exmark','Ferris','Gravely','Husqvarna','Hustler','John Deere','Kioti','Kubota','Mahindra','Massey Ferguson','MTD','New Holland','Poulan','RedMax','Scag','Simplicity','Snapper','Spartan','Stihl','Toro','Troy-Bilt','Walker','Wright','Yanmar'];
+const commonEngineBrands=['Briggs & Stratton','Generac','Honda','Kawasaki','Kohler','Kubota','LCT','Loncin','Predator','Subaru / Robin','Tecumseh','Vanguard','Yamaha','Yanmar'];
 
 const approvals=[
  'PENDING','APPROVED','DECLINED','NOT_REQUIRED'
@@ -3525,7 +3525,9 @@ function TicketForm({
 }
 
 function SuggestField({l,k,f,s,opts}){
- const id=`list-${k}`; return <label>{l}<input list={id} value={f[k]||''} onChange={e=>s({...f,[k]:e.target.value})}/><datalist id={id}>{opts.map(x=><option key={x} value={x}/>)}</datalist></label>;
+ const id=`list-${k}`;
+ const choices=[...new Map(opts.filter(Boolean).map(x=>[String(x).trim().toLowerCase(),String(x).trim()])).values()].sort((a,b)=>a.localeCompare(b));
+ return <label>{l}<input list={id} value={f[k]||''} placeholder={`Select or type ${l.toLowerCase()}`} autoComplete="off" onChange={e=>s({...f,[k]:e.target.value})}/><datalist id={id}>{choices.map(x=><option key={x} value={x}/>)}</datalist><small className="muted">Choose a suggestion or type another brand.</small></label>;
 }
 
 function SchedulePage({schedule,customers,equipment,tickets,setError,setNotice,reload}){
@@ -3550,15 +3552,31 @@ function SchedulePage({schedule,customers,equipment,tickets,setError,setNotice,r
   setNotice('Scheduled');setTimeout(()=>setNotice(''),2000);await reload(false);
  }
  async function complete(x){
-  const status=x.schedule_type==='PICKUP'?'PICKED_UP':'DELIVERED',now=new Date().toISOString();
-  const r=await sb.from('schedule').update({status,completed_at:now}).eq('id',x.id);
-  if(r.error){setError(r.error.message);return;}
+  // Only active stops can be completed; prevents accidental duplicate handoffs.
+  if(x.status!=='SCHEDULED')return;
+  const isPickup=x.schedule_type==='PICKUP';
+  const now=new Date().toISOString();
+  const stopStatus=isPickup?'PICKED_UP':'DELIVERED';
   if(x.ticket_id){
-   const tr=x.schedule_type==='PICKUP'
-    ? await sb.from('tickets').update({transport_status:'PICKED_UP'}).eq('id',x.ticket_id)
-    : await sb.from('tickets').update({transport_status:'DELIVERED',handoff_completed_at:now,archived:true,archived_at:now,status:'COMPLETED'}).eq('id',x.ticket_id);
-   if(tr.error){setError(tr.error.message);return;}
+   const linked=tickets.find(t=>t.id===x.ticket_id);
+   // A pickup brings the equipment into the shop. Keep the repair's existing
+   // status (including an in-progress repair), rather than completing it.
+   const ticketChanges=isPickup
+    ? {transport_status:'PICKED_UP',pickup_delivery_type:'PICKUP'}
+    : {transport_status:'DELIVERED',pickup_delivery_type:'DELIVERY',handoff_completed_at:now,archived:true,archived_at:now,status:'COMPLETED'};
+   if(isPickup&&linked?.status==='COMPLETED'){
+    setError('This ticket is already completed. Reopen the ticket before marking its pickup.');
+    return;
+   }
+   const tr=await sb.from('tickets').update(ticketChanges).eq('id',x.ticket_id);
+   if(tr.error){setError(`Ticket not updated: ${tr.error.message}`);return;}
   }
+  const r=await sb.from('schedule').update({status:stopStatus,completed_at:now}).eq('id',x.id).eq('status','SCHEDULED').select('id');
+  if(r.error){setError(`Ticket updated, but schedule completion failed: ${r.error.message}`);await reload(false);return;}
+  if(!r.data?.length){setError('This stop was already completed or changed. Refresh the schedule.');await reload(false);return;}
+  setError('');
+  setNotice(isPickup?'Pickup completed — equipment received for repair':'Delivery completed — ticket closed');
+  setTimeout(()=>setNotice(''),3000);
   await reload(false);
  }
  async function deleteSchedule(x){
