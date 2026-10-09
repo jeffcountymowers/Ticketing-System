@@ -1,4 +1,4 @@
-import React,{useEffect,useState} from 'react';
+import React,{useEffect,useState,useRef} from 'react';
 import {createRoot} from 'react-dom/client';
 import {createClient} from '@supabase/supabase-js';
 import './style.css';
@@ -1646,6 +1646,7 @@ function TicketForm({
  setModal
 }){
 
+ const inventorySyncing=useRef(new Set());
  const [parts,setParts]=useState([]);
  const [labor,setLabor]=useState([]);
  const [loaded,setLoaded]=useState(false);
@@ -2351,6 +2352,47 @@ function TicketForm({
    setError(r.error.message);
   }
  }
+
+  // A manually entered ticket part becomes a reusable catalog entry once
+  // its part number and description have been entered. Never add stock here:
+  // a part used on a repair is not a new item received into inventory.
+  async function saveManualPartToInventory(part){
+   const partNumber=String(part.part_number||'').trim();
+   const description=String(part.description||'').trim();
+   if(!partNumber || !description || description==='New Part')return;
+
+   const key=partNumber.toLowerCase();
+   if(inventorySyncing.current.has(key))return;
+   inventorySyncing.current.add(key);
+   try{
+    // Check the database, not just local state, to avoid creating a second
+    // entry when another device has already saved this part.
+    const existing=await sb.from('parts_catalog').select('id,part_number');
+    if(existing.error)throw existing.error;
+    if((existing.data||[]).some(p=>String(p.part_number||'').trim().toLowerCase()===key))return;
+
+    const result=await sb.from('parts_catalog').insert({
+     part_number:partNumber,
+     description,
+     price:Number(part.unit_price||0),
+     quantity_on_hand:0,
+     cost:0,
+     supplier:'',
+     bin_location:'',
+     low_stock_level:0,
+     notes:''
+    }).select().single();
+    if(result.error)throw result.error;
+    setPartsCatalog(prev=>prev.some(p=>p.id===result.data.id)
+     ?prev:[...prev,result.data].sort((a,b)=>String(a.part_number||'').localeCompare(String(b.part_number||''))));
+    setNotice(`Part ${partNumber} added to inventory`);
+    setTimeout(()=>setNotice(''),2500);
+   }catch(err){
+    setError(`Inventory save failed for ${partNumber}: ${err.message||err}`);
+   }finally{
+    inventorySyncing.current.delete(key);
+   }
+  }
 
  async function updateLabor(
   id,
@@ -3076,6 +3118,7 @@ function TicketForm({
 
       <input
        placeholder="Part #"
+        onBlur={()=>saveManualPartToInventory(p)}
        value={
         p.part_number||''
        }
@@ -3093,6 +3136,7 @@ function TicketForm({
 
       <input
        placeholder="Description"
+        onBlur={()=>saveManualPartToInventory(p)}
        value={
         p.description||''
        }
@@ -3130,6 +3174,7 @@ function TicketForm({
        type="number"
        step="0.01"
        placeholder="Price"
+        onBlur={()=>saveManualPartToInventory(p)}
        value={p.unit_price}
        disabled={form.archived}
        onChange={e=>
