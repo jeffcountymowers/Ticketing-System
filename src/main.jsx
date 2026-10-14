@@ -2541,7 +2541,7 @@ function TicketForm({
    const html=`<!doctype html><html><head><meta charset="utf-8"><title>JeffCo ${isInvoice?'Invoice':'Repair Ticket'} #${esc(form.ticket_number||'New')}</title>
     <style>
      *{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;margin:0;padding:26px;color:#171717;font-size:12px;line-height:1.45}
-     .masthead{display:flex;align-items:center;justify-content:center;background:#111;padding:14px 18px;border-bottom:6px solid #8ac83f}
+     .masthead{display:flex;align-items:center;justify-content:center;background:#fff;color:#171717;padding:14px 18px;border-bottom:6px solid #8ac83f}
      .logo{display:block;width:210px;max-width:100%;height:auto;object-fit:contain}
      .docline{display:flex;justify-content:space-between;align-items:center;gap:10px;border-bottom:2px solid #8ac83f;padding:15px 0 12px}
      .docline h2{font-size:20px;margin:0}.muted{color:#555}.twocol{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:17px 0}
