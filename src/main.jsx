@@ -2568,7 +2568,8 @@ function TicketForm({
      table{width:100%;border-collapse:collapse;margin-top:10px;font-size:11px}th{background:#eaf4dc;text-align:left}th,td{padding:8px 6px;border-bottom:1px solid #ddd;vertical-align:top}
      .totals{margin:16px 0 0 auto;max-width:300px}.totals>div{display:flex;justify-content:space-between;padding:5px 0}.grand{font-size:17px;font-weight:bold;border-top:2px solid #171717;margin-top:5px;padding-top:9px!important}
      .footer{clear:both;margin-top:35px;padding-top:10px;border-top:2px solid #8ac83f;text-align:center;font-size:11px;color:#444}
-     .equipment-tag{margin-top:auto;flex-shrink:0;border-top:2px dashed #555;border-right:1px solid #aaa;border-bottom:1px solid #aaa;border-left:1px solid #aaa;height:1.25in;width:100%;padding:6px 10px;break-inside:avoid;page-break-inside:avoid;display:flex;flex-direction:column;justify-content:space-between}
+     body.ticket-print{position:relative;min-height:11in;padding-bottom:1.55in}
+     .equipment-tag{position:absolute;bottom:0;left:0;margin:0;border-top:2px dashed #555;border-right:1px solid #aaa;border-bottom:1px solid #aaa;border-left:1px solid #aaa;height:1.25in;width:8.5in;max-width:100%;padding:6px 10px;break-inside:avoid;page-break-inside:avoid;display:flex;flex-direction:column;justify-content:space-between;background:#fff}
      .tag-cut{font-size:8px;letter-spacing:1px;color:#555;margin-top:-5px;background:white;align-self:flex-start;padding:0 7px}
      .tag-heading{display:flex;justify-content:space-between;gap:8px;font-size:10px;font-weight:bold}
      .tag-number{font-size:21px;font-weight:800;line-height:1.1}
@@ -2576,7 +2577,7 @@ function TicketForm({
      .tag-fields strong{display:block;font-size:8px;text-transform:uppercase;color:#555}
      .invoice-copy{break-after:page;page-break-after:always}.invoice-copy:last-child{break-after:auto;page-break-after:auto}.copy-label{font-size:11px;font-weight:bold;text-align:right;margin:6px 0;color:#555}
      .printbar{margin:0 0 12px;text-align:right}.printbar button{background:#477c1c;color:white;border:0;border-radius:5px;padding:9px 15px;cursor:pointer}
-     @page{size:letter;margin:12mm}@media print{body{padding:0}body.ticket-print{min-height:calc(11in - 24mm);display:flex;flex-direction:column}.printbar{display:none}.masthead{-webkit-print-color-adjust:exact;print-color-adjust:exact}th{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+     @page{size:letter;margin:0}@media print{body.invoice-print{padding:12mm}body.ticket-print{position:relative;width:8.5in;min-height:11in;padding:12mm 12mm 1.55in;margin:0;display:block}.ticket-writing-space{display:none}.printbar{display:none}.masthead{-webkit-print-color-adjust:exact;print-color-adjust:exact}th{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
     </style></head><body class="${isInvoice?'invoice-print':'ticket-print'}">
     <div class="printbar"><button onclick="window.print()">Print / Save PDF</button></div>
     ${isInvoice?['MERCHANT COPY','CUSTOMER COPY'].map(copyLabel=>`<section class="invoice-copy">
@@ -3596,9 +3597,17 @@ function TicketForm({
 }
 
 function SuggestField({l,k,f,s,opts}){
- const id=`list-${k}`;
  const choices=[...new Map(opts.filter(Boolean).map(x=>[String(x).trim().toLowerCase(),String(x).trim()])).values()].sort((a,b)=>a.localeCompare(b));
- return <label>{l}<input list={id} value={f[k]||''} placeholder={`Select or type ${l.toLowerCase()}`} autoComplete="off" onChange={e=>s({...f,[k]:e.target.value})}/><datalist id={id}>{choices.map(x=><option key={x} value={x}/>)}</datalist><small className="muted">Choose a suggestion or type another brand.</small></label>;
+ const current=f[k]||'';
+ const selected=choices.find(x=>x.toLowerCase()===String(current).trim().toLowerCase())||'';
+ return <label>{l}
+  <select value={selected} onChange={e=>s({...f,[k]:e.target.value})}>
+   <option value="">{current&&!selected?'Custom brand — see below':'Select a brand'}</option>
+   {choices.map(x=><option key={x} value={x}>{x}</option>)}
+  </select>
+  <input type="text" value={current} placeholder={`Or type a custom ${l.toLowerCase()}`} autoComplete="off" onChange={e=>s({...f,[k]:e.target.value})}/>
+  <small className="muted">Select a brand from the dropdown, or type a custom brand below it.</small>
+ </label>;
 }
 
 function SchedulePage({schedule,customers,equipment,tickets,setError,setNotice,reload,editTicket}){
