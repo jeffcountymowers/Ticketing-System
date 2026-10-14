@@ -2551,6 +2551,12 @@ function TicketForm({
      table{width:100%;border-collapse:collapse;margin-top:10px;font-size:11px}th{background:#eaf4dc;text-align:left}th,td{padding:8px 6px;border-bottom:1px solid #ddd;vertical-align:top}
      .totals{margin:16px 0 0 auto;max-width:300px}.totals>div{display:flex;justify-content:space-between;padding:5px 0}.grand{font-size:17px;font-weight:bold;border-top:2px solid #171717;margin-top:5px;padding-top:9px!important}
      .footer{clear:both;margin-top:35px;padding-top:10px;border-top:2px solid #8ac83f;text-align:center;font-size:11px;color:#444}
+     .equipment-tag{margin-top:24px;border-top:2px dashed #555;border-right:1px solid #aaa;border-bottom:1px solid #aaa;border-left:1px solid #aaa;height:2in;width:100%;padding:12px 16px;break-inside:avoid;page-break-inside:avoid;display:flex;flex-direction:column;justify-content:space-between}
+     .tag-cut{font-size:10px;letter-spacing:1px;color:#555;margin-top:-8px;background:white;align-self:flex-start;padding:0 7px}
+     .tag-heading{display:flex;justify-content:space-between;gap:10px;font-size:12px;font-weight:bold}
+     .tag-number{font-size:28px;font-weight:800;line-height:1.1}
+     .tag-fields{display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px}
+     .tag-fields strong{display:block;font-size:10px;text-transform:uppercase;color:#555}
      .invoice-copy{break-after:page;page-break-after:always}.invoice-copy:last-child{break-after:auto;page-break-after:auto}.copy-label{font-size:11px;font-weight:bold;text-align:right;margin:6px 0;color:#555}
      .printbar{margin:0 0 12px;text-align:right}.printbar button{background:#477c1c;color:white;border:0;border-radius:5px;padding:9px 15px;cursor:pointer}
      @page{size:auto;margin:12mm}@media print{body{padding:0}.printbar{display:none}.masthead{-webkit-print-color-adjust:exact;print-color-adjust:exact}th{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
@@ -2572,6 +2578,7 @@ function TicketForm({
     <section class="panel"><h3>Equipment</h3>${detail('Equipment',equipmentLabel)}${detail('Type',machine?.equipment_type)}${detail('Serial Number',machine?.serial_number)}${detail('Engine',[machine?.engine,machine?.engine_model].filter(Boolean).join(' '))}${detail('Repair Status',form.status)}</section></div>
     <section class="work"><h2>Repair Details</h2>${detail('Customer Reported Issue',form.customer_issue)}${detail('Diagnosis',form.diagnosis)}${detail('Additional Work',form.additional_work)}${detail('Work Performed',form.work_performed)}${detail('Pickup / Delivery Details',form.pickup_delivery_details)}${!isInvoice?detail('Parts Needed',form.parts_needed):''}</section>
     ${charges}
+    <section class="equipment-tag"><div class="tag-cut">✂ CUT ALONG DASHED LINE</div><div class="tag-heading"><span>JEFFCO LAWN MOWER REPAIR</span><span>EQUIPMENT TAG</span></div><div class="tag-number">TICKET #${esc(form.ticket_number||'New')}</div><div class="tag-fields"><div><strong>Customer</strong>${esc(customer?.name||'Not specified')}</div><div><strong>Equipment / Brand</strong>${esc(equipmentLabel)}</div><div><strong>Model</strong>${esc(machine?.model||'Not specified')}</div><div><strong>Serial Number</strong>${esc(machine?.serial_number||'')}</div></div></section>
 `}
     
     </body></html>`;
