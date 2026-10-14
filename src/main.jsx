@@ -143,6 +143,7 @@ function App(){
 
  const [session,setSession]=useState(null);
  const [tab,setTab]=useState('Dashboard');
+ const [ticketSection,setTicketSection]=useState('All Active');
  const [customers,setCustomers]=useState([]);
  const [equipment,setEquipment]=useState([]);
  const [tickets,setTickets]=useState([]);
@@ -398,7 +399,18 @@ function App(){
   const e=equipment.find(x=>x.id===t.equipment_id)||{};
   return {...t,...c,equipment_type:e.equipment_type,manufacturer:e.manufacturer,equipment_model:e.model,serial_number:e.serial_number,engine:e.engine,engine_model:e.engine_model};
  };
- const filteredTickets=activeTickets.filter(t=>search(ticketSearchRecord(t)));
+ const ticketSections=['All Active','New','Pending Pickup','In Progress','Waiting on Parts','Ready for Pickup','Completed'];
+ const ticketCategory=t=>{
+  if(t.transport_status==='WAITING_FOR_PICKUP')return 'Pending Pickup';
+  if(t.status==='COMPLETED')return 'Completed';
+  if(t.status==='WAITING FOR PARTS')return 'Waiting on Parts';
+  if(t.status==='READY FOR PICKUP'||t.status==='PENDING DELIVERY')return 'Ready for Pickup';
+  if(t.status==='NEW')return 'New';
+  return 'In Progress';
+ };
+ const ticketPool=tickets.filter(t=>!t.archived);
+ const filteredTickets=ticketPool.filter(t=>(ticketSection==='All Active'||ticketCategory(t)===ticketSection)&&search(ticketSearchRecord(t)));
+ const ticketSectionCount=section=>ticketPool.filter(t=>section==='All Active'||ticketCategory(t)===section).length;
  const filteredArchivedTickets=archivedTickets.filter(t=>search(ticketSearchRecord(t))); if(!session){
 
   return <Login
@@ -833,6 +845,10 @@ function App(){
        }}
       />
 
+      <div style={{display:'flex',flexWrap:'wrap',gap:8,margin:'12px 0'}}>
+       {ticketSections.map(section=><button key={section} type="button" className="small" onClick={()=>setTicketSection(section)} style={{background:ticketSection===section?'#2563eb':'#e5e7eb',color:ticketSection===section?'white':'#111827',border:'none',padding:'10px 14px',borderRadius:8,fontWeight:600}}>{section} ({ticketSectionCount(section)})</button>)}
+      </div>
+
       <Search
        q={q}
        setQ={setQ}
@@ -842,7 +858,7 @@ function App(){
 
        {!filteredTickets.length&&
         <div className="empty">
-         No active tickets found.
+         No tickets found in this section.
         </div>
        }
 
@@ -880,6 +896,7 @@ function App(){
        setError={setError}
        setNotice={setNotice}
        reload={load}
+       editTicket={t=>{setForm(t);setModal('ticket');}}
       />
      }
 
@@ -3547,7 +3564,7 @@ function SuggestField({l,k,f,s,opts}){
  return <label>{l}<input list={id} value={f[k]||''} placeholder={`Select or type ${l.toLowerCase()}`} autoComplete="off" onChange={e=>s({...f,[k]:e.target.value})}/><datalist id={id}>{choices.map(x=><option key={x} value={x}/>)}</datalist><small className="muted">Choose a suggestion or type another brand.</small></label>;
 }
 
-function SchedulePage({schedule,customers,equipment,tickets,setError,setNotice,reload}){
+function SchedulePage({schedule,customers,equipment,tickets,setError,setNotice,reload,editTicket}){
  const today=new Date().toISOString().slice(0,10);
  const [date,setDate]=useState(today),[type,setType]=useState('PICKUP'),[customerId,setCustomerId]=useState(''),[ticketId,setTicketId]=useState(''),[time,setTime]=useState(''),[notes,setNotes]=useState('');
  const [routeProgress,setRouteProgress]=useState(null);
@@ -3679,14 +3696,14 @@ function SchedulePage({schedule,customers,equipment,tickets,setError,setNotice,r
   openAppleStop(next);
  }
  const waiting=tickets.filter(t=>!t.archived&&t.pickup_delivery_type==='PICKUP'&&t.transport_status==='WAITING_FOR_PICKUP');
- const stopRow=(x,keyPrefix='')=><div className="row" key={`${keyPrefix}${x.id}`}><div><b>{keyPrefix?`${x.scheduled_date} · `:''}{x.schedule_type} · {cname(x.customer_id)}</b><small>{x.scheduled_time||'No time'} · {[x.address,x.city].filter(Boolean).join(', ')||'No address'}</small><small>{x.status}{x.limit_override?' · LIMIT OVERRIDE':''}{x.notes?` · ${x.notes}`:''}</small></div><div className="rowactions"><button className="small" onClick={()=>route(x)}>Navigate</button>{x.status==='SCHEDULED'&&<button className="small" onClick={()=>complete(x)}>{x.schedule_type==='PICKUP'?'Picked Up':'Delivered'}</button>}{x.status==='SCHEDULED'&&<button className="small danger" onClick={()=>deleteSchedule(x)}>Delete</button>}</div></div>;
+ const stopRow=(x,keyPrefix='')=><div className="row" key={`${keyPrefix}${x.id}`}><div><b>{keyPrefix?`${x.scheduled_date} · `:''}{x.schedule_type} · {cname(x.customer_id)}</b><small>{x.scheduled_time||'No time'} · {[x.address,x.city].filter(Boolean).join(', ')||'No address'}</small><small>{x.status}{x.limit_override?' · LIMIT OVERRIDE':''}{x.notes?` · ${x.notes}`:''}</small></div><div className="rowactions">{x.ticket_id&&tickets.find(t=>t.id===x.ticket_id)&&<button className="small" onClick={()=>editTicket(tickets.find(t=>t.id===x.ticket_id))}>Edit Ticket</button>}<button className="small" onClick={()=>route(x)}>Navigate</button>{x.status==='SCHEDULED'&&<button className="small" onClick={()=>complete(x)}>{x.schedule_type==='PICKUP'?'Picked Up':'Delivered'}</button>}{x.status==='SCHEDULED'&&<button className="small danger" onClick={()=>deleteSchedule(x)}>Delete</button>}</div></div>;
  return <>
   <div className="top"><div><h2>Schedule</h2><p className="muted">Pickups {pickups.length}/2 · Deliveries {deliveries.length}/2</p></div><button onClick={routeDay}>Start Apple Maps Route</button></div>
   {currentRouteIndex>=0&&<section className="panel"><b>Apple Maps Route — Stop {currentRouteIndex+1} of {routeStops.length}</b><p className="muted">{cname(routeStops[currentRouteIndex].customer_id)} · {routeStops[currentRouteIndex].schedule_type} · {[routeStops[currentRouteIndex].address,routeStops[currentRouteIndex].city].filter(Boolean).join(', ')}</p><div className="rowactions"><button className="small" onClick={()=>openAppleStop(routeStops[currentRouteIndex])}>Reopen Current Stop</button>{currentRouteIndex<routeStops.length-1?<button onClick={nextRouteStop}>Next Stop in Apple Maps</button>:<button onClick={()=>setRouteProgress(null)}>Finish Route</button>}</div><small>Apple Maps navigates to one destination at a time. Return here after each stop to continue.</small></section>}
   <section className="panel"><div className="form"><Field l="Date" k="date" f={{date}} s={x=>setDate(x.date)} type="date"/><label>Type<select value={type} onChange={e=>setType(e.target.value)}><option>PICKUP</option><option>DELIVERY</option></select></label><label>Customer<select value={customerId} onChange={e=>{setCustomerId(e.target.value);setTicketId('');}}><option value="">Select…</option>{customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><button type="button" className="small" onClick={()=>setShowNewCustomer(v=>!v)}>{showNewCustomer?'Cancel New Customer':'+ Add New Customer'}</button>{showNewCustomer&&<div className="panel"><h3>New Customer</h3><div className="form"><Field l="Name" k="name" f={newCustomer} s={setNewCustomer}/><Field l="Phone" k="phone" f={newCustomer} s={setNewCustomer}/><Field l="Address" k="address" f={newCustomer} s={setNewCustomer}/><Field l="City" k="city" f={newCustomer} s={setNewCustomer}/><Field l="Notes" k="notes" f={newCustomer} s={setNewCustomer} area/><button type="button" disabled={creatingCustomer} onClick={createScheduleCustomer}>{creatingCustomer?'Saving…':'Save New Customer'}</button></div></div>}<label>Ticket<select value={ticketId} onChange={e=>setTicketId(e.target.value)}><option value="">Optional…</option>{tickets.filter(t=>!t.archived&&(!customerId||t.customer_id===customerId)).map(t=><option key={t.id} value={t.id}>#{t.ticket_number}</option>)}</select></label>{type==='PICKUP'&&!ticketId&&<section className="panel"><h3>New Equipment & Repair Ticket</h3><small>All equipment and complaint fields are optional. Scheduling creates a Pending Pickup ticket automatically; fill in details later at the customer’s location. Choose an existing ticket above to avoid creating another.</small><div className="form"><Field l="Equipment Type" k="equipment_type" f={pickupEquipment} s={setPickupEquipment}/><Field l="Manufacturer / Brand" k="manufacturer" f={pickupEquipment} s={setPickupEquipment}/><Field l="Model" k="model" f={pickupEquipment} s={setPickupEquipment}/><Field l="Serial Number" k="serial_number" f={pickupEquipment} s={setPickupEquipment}/><Field l="Engine" k="engine" f={pickupEquipment} s={setPickupEquipment}/><Field l="Engine Model" k="engine_model" f={pickupEquipment} s={setPickupEquipment}/><Field l="Equipment Notes" k="notes" f={pickupEquipment} s={setPickupEquipment} area/><label>Customer Complaint<textarea value={pickupIssue} onChange={e=>setPickupIssue(e.target.value)}/></label></div></section>}<Field l="Time" k="time" f={{time}} s={x=>setTime(x.time)} type="time"/><Field l="Notes" k="notes" f={{notes}} s={x=>setNotes(x.notes)} area/><button onClick={add} disabled={creatingStop}>{creatingStop?'Saving…':'Add to Schedule'}</button></div></section>
   <section className="panel"><h3>{date} — Scheduled Stops</h3>{!day.length&&<div className="empty">Nothing scheduled.</div>}{day.map(x=>stopRow(x))}</section>
   <section className="panel"><h3>All Upcoming Pickups and Deliveries</h3>{!upcoming.length&&<div className="empty">No upcoming pickups or deliveries.</div>}{upcoming.map(x=>stopRow(x,'upcoming-'))}</section>
-  {waiting.length>0&&<section className="panel"><h3>Waiting for Pickup</h3>{waiting.map(t=><div className="row" key={t.id}><div><b>Ticket #{t.ticket_number} · {cname(t.customer_id)}</b><small>Not yet picked up</small></div></div>)}</section>}
+  {waiting.length>0&&<section className="panel"><h3>Waiting for Pickup</h3>{waiting.map(t=><div className="row" key={t.id}><div><b>Ticket #{t.ticket_number} · {cname(t.customer_id)}</b><small>Not yet picked up</small></div><div className="rowactions"><button className="small" onClick={()=>editTicket(t)}>Edit Ticket</button></div></div>)}</section>}
  </>;
 }
 
