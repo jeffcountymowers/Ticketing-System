@@ -3603,7 +3603,9 @@ function SchedulePage({schedule,customers,equipment,tickets,setError,setNotice,r
     // Schedule-specific date/time fields are not ticket columns and blank
     // date strings are invalid for PostgreSQL DATE columns.
     const {pickup_date:_pickupDate,pickup_time:_pickupTime,delivery_date:_deliveryDate,delivery_time:_deliveryTime,...ticketDefaults}=blankTicket;
-    const tr=await sb.from('tickets').insert({...ticketDefaults,customer_id:customerId,equipment_id:linkedEquipment,customer_issue:pickupIssue,transport_status:'WAITING_FOR_PICKUP',pickup_delivery_type:'PICKUP'}).select().single();
+    // PostgreSQL numeric columns cannot accept an empty string.
+    // Keep the estimate unset until the equipment is assessed.
+    const tr=await sb.from('tickets').insert({...ticketDefaults,estimate:null,customer_id:customerId,equipment_id:linkedEquipment,customer_issue:pickupIssue,transport_status:'WAITING_FOR_PICKUP',pickup_delivery_type:'PICKUP'}).select().single();
     if(tr.error){setError(`Ticket not created: ${tr.error.message}`);return;}
     createdTicket=tr.data;linkedId=tr.data.id;
    }else if(type==='PICKUP'&&linkedId){
