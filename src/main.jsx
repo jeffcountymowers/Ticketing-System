@@ -2551,16 +2551,28 @@ function TicketForm({
      table{width:100%;border-collapse:collapse;margin-top:10px;font-size:11px}th{background:#eaf4dc;text-align:left}th,td{padding:8px 6px;border-bottom:1px solid #ddd;vertical-align:top}
      .totals{margin:16px 0 0 auto;max-width:300px}.totals>div{display:flex;justify-content:space-between;padding:5px 0}.grand{font-size:17px;font-weight:bold;border-top:2px solid #171717;margin-top:5px;padding-top:9px!important}
      .footer{clear:both;margin-top:35px;padding-top:10px;border-top:2px solid #8ac83f;text-align:center;font-size:11px;color:#444}
+     .invoice-copy{break-after:page;page-break-after:always}.invoice-copy:last-child{break-after:auto;page-break-after:auto}.copy-label{font-size:11px;font-weight:bold;text-align:right;margin:6px 0;color:#555}
      .printbar{margin:0 0 12px;text-align:right}.printbar button{background:#477c1c;color:white;border:0;border-radius:5px;padding:9px 15px;cursor:pointer}
      @page{size:auto;margin:12mm}@media print{body{padding:0}.printbar{display:none}.masthead{-webkit-print-color-adjust:exact;print-color-adjust:exact}th{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
     </style></head><body>
     <div class="printbar"><button onclick="window.print()">Print / Save PDF</button></div>
+    ${isInvoice?['MERCHANT COPY','CUSTOMER COPY'].map(copyLabel=>`<section class="invoice-copy">
     <header class="masthead"><img class="logo" src="${JEFFCO_PRINT_LOGO}" alt="JeffCo Lawn Mower Repair logo"></header>
+    ${isInvoice?`<div class="copy-label">${copyLabel}</div>`:''}
     <div class="docline"><h2>${isInvoice?'REPAIR INVOICE':'REPAIR TICKET'}</h2><div><strong>Ticket #${esc(form.ticket_number||'New')}</strong><div class="muted">Printed ${esc(new Date().toLocaleDateString())}</div></div></div>
     <div class="twocol"><section class="panel"><h3>Customer</h3>${detail('Name',customer?.name||'Customer')}${detail('Phone',customer?.phone)}${detail('Address',[customer?.address,customer?.city].filter(Boolean).join(', '))}</section>
     <section class="panel"><h3>Equipment</h3>${detail('Equipment',equipmentLabel)}${detail('Type',machine?.equipment_type)}${detail('Serial Number',machine?.serial_number)}${detail('Engine',[machine?.engine,machine?.engine_model].filter(Boolean).join(' '))}${detail('Repair Status',form.status)}</section></div>
     <section class="work"><h2>Repair Details</h2>${detail('Customer Reported Issue',form.customer_issue)}${detail('Diagnosis',form.diagnosis)}${detail('Additional Work',form.additional_work)}${detail('Work Performed',form.work_performed)}${detail('Pickup / Delivery Details',form.pickup_delivery_details)}${!isInvoice?detail('Parts Needed',form.parts_needed):''}</section>
     ${charges}
+
+    </section>`).join(''):`    <header class="masthead"><img class="logo" src="${JEFFCO_PRINT_LOGO}" alt="JeffCo Lawn Mower Repair logo"></header>
+    ${isInvoice?`<div class="copy-label">${copyLabel}</div>`:''}
+    <div class="docline"><h2>${isInvoice?'REPAIR INVOICE':'REPAIR TICKET'}</h2><div><strong>Ticket #${esc(form.ticket_number||'New')}</strong><div class="muted">Printed ${esc(new Date().toLocaleDateString())}</div></div></div>
+    <div class="twocol"><section class="panel"><h3>Customer</h3>${detail('Name',customer?.name||'Customer')}${detail('Phone',customer?.phone)}${detail('Address',[customer?.address,customer?.city].filter(Boolean).join(', '))}</section>
+    <section class="panel"><h3>Equipment</h3>${detail('Equipment',equipmentLabel)}${detail('Type',machine?.equipment_type)}${detail('Serial Number',machine?.serial_number)}${detail('Engine',[machine?.engine,machine?.engine_model].filter(Boolean).join(' '))}${detail('Repair Status',form.status)}</section></div>
+    <section class="work"><h2>Repair Details</h2>${detail('Customer Reported Issue',form.customer_issue)}${detail('Diagnosis',form.diagnosis)}${detail('Additional Work',form.additional_work)}${detail('Work Performed',form.work_performed)}${detail('Pickup / Delivery Details',form.pickup_delivery_details)}${!isInvoice?detail('Parts Needed',form.parts_needed):''}</section>
+    ${charges}
+`}
     
     </body></html>`;
    const w=window.open('','_blank');
