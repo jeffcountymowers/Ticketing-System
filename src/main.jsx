@@ -995,6 +995,10 @@ function App(){
       form={form}
       setForm={setForm}
       save={save}
+      equipment={equipment}
+      setError={setError}
+      setNotice={setNotice}
+      reload={async()=>{await load();setModal(null);}}
      />
     }
 
@@ -1467,9 +1471,32 @@ function CustomerRecord({
 function CustomerForm({
  form,
  setForm,
- save
+ save,
+ equipment,
+ setError,
+ setNotice,
+ reload
 }){
-
+ const [addEquipment,setAddEquipment]=useState(false);
+ const [newEquipment,setNewEquipment]=useState({...blankEquipment});
+ const [saving,setSaving]=useState(false);
+ async function saveCustomerAndEquipment(){
+  if(!addEquipment || ![newEquipment.equipment_type,newEquipment.manufacturer,newEquipment.model,newEquipment.engine].some(x=>String(x||'').trim())){
+   await save('customers',form);
+   return;
+  }
+  setSaving(true);
+  setError('');
+  try{
+   const cr=await sb.from('customers').upsert({...form}).select().single();
+   if(cr.error)throw cr.error;
+   const er=await sb.from('equipment').insert({...newEquipment,customer_id:cr.data.id}).select().single();
+   if(er.error)throw er.error;
+   setNotice('Customer and equipment saved successfully');
+   await reload();
+  }catch(e){setError(e.message||String(e));}
+  finally{setSaving(false);}
+ }
  return <div className="form">
 
   <Field
@@ -1508,16 +1535,18 @@ function CustomerForm({
    area
   />
 
-  <button
-   onClick={()=>
-    save(
-     'customers',
-     form
-    )
-   }
-  >
-   Save Customer
-  </button>
+  <button type="button" className="small" onClick={()=>setAddEquipment(v=>!v)}>{addEquipment?'− Remove New Equipment':'+ Add Equipment to Customer'}</button>
+  {addEquipment&&<section className="inlineform">
+   <h4>Customer Equipment (Optional)</h4>
+   <Field l="Equipment Type" k="equipment_type" f={newEquipment} s={setNewEquipment}/>
+   <SuggestField l="Manufacturer / Brand" k="manufacturer" f={newEquipment} s={setNewEquipment} opts={[...new Set([...commonEquipmentBrands,...equipment.map(x=>x.manufacturer).filter(Boolean)])].sort()}/>
+   <Field l="Model" k="model" f={newEquipment} s={setNewEquipment}/>
+   <Field l="Serial Number" k="serial_number" f={newEquipment} s={setNewEquipment}/>
+   <SuggestField l="Engine" k="engine" f={newEquipment} s={setNewEquipment} opts={[...new Set([...commonEngineBrands,...equipment.map(x=>x.engine).filter(Boolean)])].sort()}/>
+   <Field l="Engine Model" k="engine_model" f={newEquipment} s={setNewEquipment}/>
+   <Field l="Equipment Notes" k="notes" f={newEquipment} s={setNewEquipment} area/>
+  </section>}
+  <button disabled={saving} onClick={saveCustomerAndEquipment}>{saving?'Saving…':'Save Customer'}</button>
 
  </div>;
 }
@@ -2977,12 +3006,7 @@ function TicketForm({
        s={setNewEquipment}
       />
 
-      <Field
-       l="Manufacturer"
-       k="manufacturer"
-       f={newEquipment}
-       s={setNewEquipment}
-      />
+      <SuggestField l="Manufacturer" k="manufacturer" f={newEquipment} s={setNewEquipment} opts={[...new Set([...commonEquipmentBrands,...equipment.map(x=>x.manufacturer).filter(Boolean)])].sort()} />
 
       <Field
        l="Model"
@@ -2998,12 +3022,7 @@ function TicketForm({
        s={setNewEquipment}
       />
 
-      <Field
-       l="Engine"
-       k="engine"
-       f={newEquipment}
-       s={setNewEquipment}
-      />
+      <SuggestField l="Engine" k="engine" f={newEquipment} s={setNewEquipment} opts={[...new Set([...commonEngineBrands,...equipment.map(x=>x.engine).filter(Boolean)])].sort()} />
 
       <Field
        l="Engine Model"
@@ -3746,7 +3765,7 @@ function SchedulePage({schedule,customers,equipment,tickets,setError,setNotice,r
  return <>
   <div className="top"><div><h2>Schedule</h2><p className="muted">Pickups {pickups.length}/2 · Deliveries {deliveries.length}/2</p></div><button onClick={routeDay}>Start Apple Maps Route</button></div>
   {currentRouteIndex>=0&&<section className="panel"><b>Apple Maps Route — Stop {currentRouteIndex+1} of {routeStops.length}</b><p className="muted">{cname(routeStops[currentRouteIndex].customer_id)} · {routeStops[currentRouteIndex].schedule_type} · {[routeStops[currentRouteIndex].address,routeStops[currentRouteIndex].city].filter(Boolean).join(', ')}</p><div className="rowactions"><button className="small" onClick={()=>openAppleStop(routeStops[currentRouteIndex])}>Reopen Current Stop</button>{currentRouteIndex<routeStops.length-1?<button onClick={nextRouteStop}>Next Stop in Apple Maps</button>:<button onClick={()=>setRouteProgress(null)}>Finish Route</button>}</div><small>Apple Maps navigates to one destination at a time. Return here after each stop to continue.</small></section>}
-  <section className="panel"><div className="form"><Field l="Date" k="date" f={{date}} s={x=>setDate(x.date)} type="date"/><label>Type<select value={type} onChange={e=>setType(e.target.value)}><option>PICKUP</option><option>DELIVERY</option></select></label><label>Customer<select value={customerId} onChange={e=>{setCustomerId(e.target.value);setTicketId('');}}><option value="">Select…</option>{customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><button type="button" className="small" onClick={()=>setShowNewCustomer(v=>!v)}>{showNewCustomer?'Cancel New Customer':'+ Add New Customer'}</button>{showNewCustomer&&<div className="panel"><h3>New Customer</h3><div className="form"><Field l="Name" k="name" f={newCustomer} s={setNewCustomer}/><Field l="Phone" k="phone" f={newCustomer} s={setNewCustomer}/><Field l="Address" k="address" f={newCustomer} s={setNewCustomer}/><Field l="City" k="city" f={newCustomer} s={setNewCustomer}/><Field l="Notes" k="notes" f={newCustomer} s={setNewCustomer} area/><button type="button" disabled={creatingCustomer} onClick={createScheduleCustomer}>{creatingCustomer?'Saving…':'Save New Customer'}</button></div></div>}<label>Ticket<select value={ticketId} onChange={e=>setTicketId(e.target.value)}><option value="">Optional…</option>{tickets.filter(t=>!t.archived&&(!customerId||t.customer_id===customerId)).map(t=><option key={t.id} value={t.id}>#{t.ticket_number}</option>)}</select></label>{type==='PICKUP'&&!ticketId&&<section className="panel"><h3>New Equipment & Repair Ticket</h3><small>All equipment and complaint fields are optional. Scheduling creates a Pending Pickup ticket automatically; fill in details later at the customer’s location. Choose an existing ticket above to avoid creating another.</small><div className="form"><Field l="Equipment Type" k="equipment_type" f={pickupEquipment} s={setPickupEquipment}/><Field l="Manufacturer / Brand" k="manufacturer" f={pickupEquipment} s={setPickupEquipment}/><Field l="Model" k="model" f={pickupEquipment} s={setPickupEquipment}/><Field l="Serial Number" k="serial_number" f={pickupEquipment} s={setPickupEquipment}/><Field l="Engine" k="engine" f={pickupEquipment} s={setPickupEquipment}/><Field l="Engine Model" k="engine_model" f={pickupEquipment} s={setPickupEquipment}/><Field l="Equipment Notes" k="notes" f={pickupEquipment} s={setPickupEquipment} area/><label>Customer Complaint<textarea value={pickupIssue} onChange={e=>setPickupIssue(e.target.value)}/></label></div></section>}<Field l="Time" k="time" f={{time}} s={x=>setTime(x.time)} type="time"/><Field l="Notes" k="notes" f={{notes}} s={x=>setNotes(x.notes)} area/><button onClick={add} disabled={creatingStop}>{creatingStop?'Saving…':'Add to Schedule'}</button></div></section>
+  <section className="panel"><div className="form"><Field l="Date" k="date" f={{date}} s={x=>setDate(x.date)} type="date"/><label>Type<select value={type} onChange={e=>setType(e.target.value)}><option>PICKUP</option><option>DELIVERY</option></select></label><label>Customer<select value={customerId} onChange={e=>{setCustomerId(e.target.value);setTicketId('');}}><option value="">Select…</option>{customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><button type="button" className="small" onClick={()=>setShowNewCustomer(v=>!v)}>{showNewCustomer?'Cancel New Customer':'+ Add New Customer'}</button>{showNewCustomer&&<div className="panel"><h3>New Customer</h3><div className="form"><Field l="Name" k="name" f={newCustomer} s={setNewCustomer}/><Field l="Phone" k="phone" f={newCustomer} s={setNewCustomer}/><Field l="Address" k="address" f={newCustomer} s={setNewCustomer}/><Field l="City" k="city" f={newCustomer} s={setNewCustomer}/><Field l="Notes" k="notes" f={newCustomer} s={setNewCustomer} area/><button type="button" disabled={creatingCustomer} onClick={createScheduleCustomer}>{creatingCustomer?'Saving…':'Save New Customer'}</button></div></div>}<label>Ticket<select value={ticketId} onChange={e=>setTicketId(e.target.value)}><option value="">Optional…</option>{tickets.filter(t=>!t.archived&&(!customerId||t.customer_id===customerId)).map(t=><option key={t.id} value={t.id}>#{t.ticket_number}</option>)}</select></label>{type==='PICKUP'&&!ticketId&&<section className="panel"><h3>New Equipment & Repair Ticket</h3><small>All equipment and complaint fields are optional. Scheduling creates a Pending Pickup ticket automatically; fill in details later at the customer’s location. Choose an existing ticket above to avoid creating another.</small><div className="form"><Field l="Equipment Type" k="equipment_type" f={pickupEquipment} s={setPickupEquipment}/><SuggestField l="Manufacturer / Brand" k="manufacturer" f={pickupEquipment} s={setPickupEquipment} opts={[...new Set([...commonEquipmentBrands,...equipment.map(x=>x.manufacturer).filter(Boolean)])].sort()}/><Field l="Model" k="model" f={pickupEquipment} s={setPickupEquipment}/><Field l="Serial Number" k="serial_number" f={pickupEquipment} s={setPickupEquipment}/><SuggestField l="Engine" k="engine" f={pickupEquipment} s={setPickupEquipment} opts={[...new Set([...commonEngineBrands,...equipment.map(x=>x.engine).filter(Boolean)])].sort()}/><Field l="Engine Model" k="engine_model" f={pickupEquipment} s={setPickupEquipment}/><Field l="Equipment Notes" k="notes" f={pickupEquipment} s={setPickupEquipment} area/><label>Customer Complaint<textarea value={pickupIssue} onChange={e=>setPickupIssue(e.target.value)}/></label></div></section>}<Field l="Time" k="time" f={{time}} s={x=>setTime(x.time)} type="time"/><Field l="Notes" k="notes" f={{notes}} s={x=>setNotes(x.notes)} area/><button onClick={add} disabled={creatingStop}>{creatingStop?'Saving…':'Add to Schedule'}</button></div></section>
   <section className="panel"><h3>{date} — Scheduled Stops</h3>{!day.length&&<div className="empty">Nothing scheduled.</div>}{day.map(x=>stopRow(x))}</section>
   <section className="panel"><h3>All Upcoming Pickups and Deliveries</h3>{!upcoming.length&&<div className="empty">No upcoming pickups or deliveries.</div>}{upcoming.map(x=>stopRow(x,'upcoming-'))}</section>
   {waiting.length>0&&<section className="panel"><h3>Waiting for Pickup</h3>{waiting.map(t=><div className="row" key={t.id}><div><b>Ticket #{t.ticket_number} · {cname(t.customer_id)}</b><small>Not yet picked up</small></div><div className="rowactions"><button className="small" onClick={()=>editTicket(t)}>Edit Ticket</button></div></div>)}</section>}
