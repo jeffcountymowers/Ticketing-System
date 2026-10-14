@@ -385,7 +385,7 @@ function App(){
 
  const activeTickets=
   tickets.filter(
-   t=>!t.archived
+   t=>!t.archived&&t.transport_status!=='WAITING_FOR_PICKUP'
   );
 
  const archivedTickets=
@@ -3554,6 +3554,9 @@ function SchedulePage({schedule,customers,equipment,tickets,setError,setNotice,r
  const [showNewCustomer,setShowNewCustomer]=useState(false);
  const [newCustomer,setNewCustomer]=useState({...blankCustomer});
  const [creatingCustomer,setCreatingCustomer]=useState(false);
+ const [pickupEquipment,setPickupEquipment]=useState({...blankEquipment});
+ const [pickupIssue,setPickupIssue]=useState('');
+ const [creatingStop,setCreatingStop]=useState(false);
  const day=schedule.filter(x=>x.scheduled_date===date&&x.status!=='CANCELLED');
  const activeDay=day.filter(x=>x.status==='SCHEDULED');
  const pickups=activeDay.filter(x=>x.schedule_type==='PICKUP');
@@ -3579,13 +3582,35 @@ function SchedulePage({schedule,customers,equipment,tickets,setError,setNotice,r
  }
  async function add(){
   if(!customerId){alert('Select a customer.');return;}
+  if(creatingStop)return;
   const count=type==='PICKUP'?pickups.length:deliveries.length;
   let override=false;
   if(count>=2){override=confirm(`${type==='PICKUP'?'Pickup':'Delivery'} limit reached for ${date} — 2 of 2 scheduled. Override daily limit?`);if(!override)return;}
-  const t=tickets.find(x=>x.id===ticketId),e=t?equipment.find(x=>x.id===t.equipment_id):null;
-  const r=await sb.from('schedule').insert({ticket_id:ticketId||null,customer_id:customerId,equipment_id:e?.id||null,schedule_type:type,scheduled_date:date,scheduled_time:time||null,address:selectedCustomer?.address||'',city:selectedCustomer?.city||'',notes,limit_override:override}).select().single();
-  if(r.error){setError(r.error.message);return;}
-  setNotice('Scheduled');setTimeout(()=>setNotice(''),2000);await reload(false);
+  setCreatingStop(true);setError('');
+  let createdTicket=null,createdEquipment=null;
+  try{
+   let linkedId=ticketId||null;
+   let linkedEquipment=tickets.find(x=>x.id===linkedId)?.equipment_id||null;
+   if(type==='PICKUP'&&!linkedId){
+    if(![pickupEquipment.equipment_type,pickupEquipment.manufacturer,pickupEquipment.model].some(v=>String(v||'').trim())){
+     alert('Enter equipment type, manufacturer, or model before scheduling a new pickup.');return;
+    }
+    const er=await sb.from('equipment').insert({...pickupEquipment,customer_id:customerId}).select().single();
+    if(er.error){setError(`Equipment not created: ${er.error.message}`);return;}
+    createdEquipment=er.data;linkedEquipment=er.data.id;
+    const tr=await sb.from('tickets').insert({...blankTicket,customer_id:customerId,equipment_id:linkedEquipment,customer_issue:pickupIssue,transport_status:'WAITING_FOR_PICKUP',pickup_delivery_type:'PICKUP'}).select().single();
+    if(tr.error){setError(`Ticket not created: ${tr.error.message}`);return;}
+    createdTicket=tr.data;linkedId=tr.data.id;
+   }else if(type==='PICKUP'&&linkedId){
+    const tr=await sb.from('tickets').update({transport_status:'WAITING_FOR_PICKUP',pickup_delivery_type:'PICKUP'}).eq('id',linkedId);
+    if(tr.error){setError(`Ticket not updated: ${tr.error.message}`);return;}
+   }
+   const r=await sb.from('schedule').insert({ticket_id:linkedId,customer_id:customerId,equipment_id:linkedEquipment,schedule_type:type,scheduled_date:date,scheduled_time:time||null,address:selectedCustomer?.address||'',city:selectedCustomer?.city||'',notes,limit_override:override}).select().single();
+   if(r.error){setError(`Schedule not saved: ${r.error.message}${createdTicket?' — A pending ticket was created. Select that ticket before retrying to avoid duplicates.':''}`);return;}
+   setPickupEquipment({...blankEquipment});setPickupIssue('');setTicketId('');setNotes('');
+   setNotice(createdTicket?`Pickup scheduled — ticket #${createdTicket.ticket_number} created`:'Scheduled');
+   await reload(false);
+  }finally{setCreatingStop(false);}
  }
  async function complete(x){
   // Only active stops can be completed; prevents accidental duplicate handoffs.
@@ -3646,12 +3671,12 @@ function SchedulePage({schedule,customers,equipment,tickets,setError,setNotice,r
   setRouteProgress({date,stopId:next.id});
   openAppleStop(next);
  }
- const waiting=tickets.filter(t=>!t.archived&&t.pickup_delivery_type==='PICKUP'&&(!t.transport_status||t.transport_status==='WAITING_FOR_PICKUP'));
+ const waiting=tickets.filter(t=>!t.archived&&t.pickup_delivery_type==='PICKUP'&&t.transport_status==='WAITING_FOR_PICKUP');
  const stopRow=(x,keyPrefix='')=><div className="row" key={`${keyPrefix}${x.id}`}><div><b>{keyPrefix?`${x.scheduled_date} · `:''}{x.schedule_type} · {cname(x.customer_id)}</b><small>{x.scheduled_time||'No time'} · {[x.address,x.city].filter(Boolean).join(', ')||'No address'}</small><small>{x.status}{x.limit_override?' · LIMIT OVERRIDE':''}{x.notes?` · ${x.notes}`:''}</small></div><div className="rowactions"><button className="small" onClick={()=>route(x)}>Navigate</button>{x.status==='SCHEDULED'&&<button className="small" onClick={()=>complete(x)}>{x.schedule_type==='PICKUP'?'Picked Up':'Delivered'}</button>}{x.status==='SCHEDULED'&&<button className="small danger" onClick={()=>deleteSchedule(x)}>Delete</button>}</div></div>;
  return <>
   <div className="top"><div><h2>Schedule</h2><p className="muted">Pickups {pickups.length}/2 · Deliveries {deliveries.length}/2</p></div><button onClick={routeDay}>Start Apple Maps Route</button></div>
   {currentRouteIndex>=0&&<section className="panel"><b>Apple Maps Route — Stop {currentRouteIndex+1} of {routeStops.length}</b><p className="muted">{cname(routeStops[currentRouteIndex].customer_id)} · {routeStops[currentRouteIndex].schedule_type} · {[routeStops[currentRouteIndex].address,routeStops[currentRouteIndex].city].filter(Boolean).join(', ')}</p><div className="rowactions"><button className="small" onClick={()=>openAppleStop(routeStops[currentRouteIndex])}>Reopen Current Stop</button>{currentRouteIndex<routeStops.length-1?<button onClick={nextRouteStop}>Next Stop in Apple Maps</button>:<button onClick={()=>setRouteProgress(null)}>Finish Route</button>}</div><small>Apple Maps navigates to one destination at a time. Return here after each stop to continue.</small></section>}
-  <section className="panel"><div className="form"><Field l="Date" k="date" f={{date}} s={x=>setDate(x.date)} type="date"/><label>Type<select value={type} onChange={e=>setType(e.target.value)}><option>PICKUP</option><option>DELIVERY</option></select></label><label>Customer<select value={customerId} onChange={e=>{setCustomerId(e.target.value);setTicketId('');}}><option value="">Select…</option>{customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><button type="button" className="small" onClick={()=>setShowNewCustomer(v=>!v)}>{showNewCustomer?'Cancel New Customer':'+ Add New Customer'}</button>{showNewCustomer&&<div className="panel"><h3>New Customer</h3><div className="form"><Field l="Name" k="name" f={newCustomer} s={setNewCustomer}/><Field l="Phone" k="phone" f={newCustomer} s={setNewCustomer}/><Field l="Address" k="address" f={newCustomer} s={setNewCustomer}/><Field l="City" k="city" f={newCustomer} s={setNewCustomer}/><Field l="Notes" k="notes" f={newCustomer} s={setNewCustomer} area/><button type="button" disabled={creatingCustomer} onClick={createScheduleCustomer}>{creatingCustomer?'Saving…':'Save New Customer'}</button></div></div>}<label>Ticket<select value={ticketId} onChange={e=>setTicketId(e.target.value)}><option value="">Optional…</option>{tickets.filter(t=>!t.archived&&(!customerId||t.customer_id===customerId)).map(t=><option key={t.id} value={t.id}>#{t.ticket_number}</option>)}</select></label><Field l="Time" k="time" f={{time}} s={x=>setTime(x.time)} type="time"/><Field l="Notes" k="notes" f={{notes}} s={x=>setNotes(x.notes)} area/><button onClick={add}>Add to Schedule</button></div></section>
+  <section className="panel"><div className="form"><Field l="Date" k="date" f={{date}} s={x=>setDate(x.date)} type="date"/><label>Type<select value={type} onChange={e=>setType(e.target.value)}><option>PICKUP</option><option>DELIVERY</option></select></label><label>Customer<select value={customerId} onChange={e=>{setCustomerId(e.target.value);setTicketId('');}}><option value="">Select…</option>{customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><button type="button" className="small" onClick={()=>setShowNewCustomer(v=>!v)}>{showNewCustomer?'Cancel New Customer':'+ Add New Customer'}</button>{showNewCustomer&&<div className="panel"><h3>New Customer</h3><div className="form"><Field l="Name" k="name" f={newCustomer} s={setNewCustomer}/><Field l="Phone" k="phone" f={newCustomer} s={setNewCustomer}/><Field l="Address" k="address" f={newCustomer} s={setNewCustomer}/><Field l="City" k="city" f={newCustomer} s={setNewCustomer}/><Field l="Notes" k="notes" f={newCustomer} s={setNewCustomer} area/><button type="button" disabled={creatingCustomer} onClick={createScheduleCustomer}>{creatingCustomer?'Saving…':'Save New Customer'}</button></div></div>}<label>Ticket<select value={ticketId} onChange={e=>setTicketId(e.target.value)}><option value="">Optional…</option>{tickets.filter(t=>!t.archived&&(!customerId||t.customer_id===customerId)).map(t=><option key={t.id} value={t.id}>#{t.ticket_number}</option>)}</select></label>{type==='PICKUP'&&!ticketId&&<section className="panel"><h3>New Equipment & Repair Ticket</h3><small>Scheduling creates a Pending Pickup ticket automatically. Choose an existing ticket above to avoid creating another.</small><div className="form"><Field l="Equipment Type" k="equipment_type" f={pickupEquipment} s={setPickupEquipment}/><Field l="Manufacturer / Brand" k="manufacturer" f={pickupEquipment} s={setPickupEquipment}/><Field l="Model" k="model" f={pickupEquipment} s={setPickupEquipment}/><Field l="Serial Number" k="serial_number" f={pickupEquipment} s={setPickupEquipment}/><Field l="Engine" k="engine" f={pickupEquipment} s={setPickupEquipment}/><Field l="Engine Model" k="engine_model" f={pickupEquipment} s={setPickupEquipment}/><Field l="Equipment Notes" k="notes" f={pickupEquipment} s={setPickupEquipment} area/><label>Customer Complaint<textarea value={pickupIssue} onChange={e=>setPickupIssue(e.target.value)}/></label></div></section>}<Field l="Time" k="time" f={{time}} s={x=>setTime(x.time)} type="time"/><Field l="Notes" k="notes" f={{notes}} s={x=>setNotes(x.notes)} area/><button onClick={add} disabled={creatingStop}>{creatingStop?'Saving…':'Add to Schedule'}</button></div></section>
   <section className="panel"><h3>{date} — Scheduled Stops</h3>{!day.length&&<div className="empty">Nothing scheduled.</div>}{day.map(x=>stopRow(x))}</section>
   <section className="panel"><h3>All Upcoming Pickups and Deliveries</h3>{!upcoming.length&&<div className="empty">No upcoming pickups or deliveries.</div>}{upcoming.map(x=>stopRow(x,'upcoming-'))}</section>
   {waiting.length>0&&<section className="panel"><h3>Waiting for Pickup</h3>{waiting.map(t=><div className="row" key={t.id}><div><b>Ticket #{t.ticket_number} · {cname(t.customer_id)}</b><small>Not yet picked up</small></div></div>)}</section>}
