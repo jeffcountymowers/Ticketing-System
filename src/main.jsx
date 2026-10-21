@@ -1749,6 +1749,7 @@ function TicketForm({
 
  const [saving,setSaving]=
   useState(false);
+ const [catalogSearch,setCatalogSearch]=useState('');
 
  const [
   catalogPartId,
@@ -2046,8 +2047,9 @@ function TicketForm({
   const customer=customers.find(c=>c.id===r.data.customer_id);
 
   async function syncScheduledStop(scheduleType,scheduledDate,scheduledTime){
-   // If this helper was never loaded/edited, leave any existing schedule alone.
-   if(scheduledDate===undefined) return null;
+   // Only an explicitly entered date may create or reschedule a stop.
+   // Existing appointments are never removed when opening or saving a ticket.
+   if(!scheduledDate)return null;
 
    const existing=await sb
     .from('schedule')
@@ -2055,17 +2057,7 @@ function TicketForm({
     .eq('ticket_id',r.data.id)
     .eq('schedule_type',scheduleType)
     .eq('status','SCHEDULED');
-
-   if(existing.error) return existing.error;
-
-   if(!scheduledDate){
-    if(existing.data?.length){
-     const ids=existing.data.map(x=>x.id);
-     const removed=await sb.from('schedule').delete().in('id',ids);
-     if(removed.error) return removed.error;
-    }
-    return null;
-   }
+   if(existing.error)return existing.error;
 
    const sameDay=await sb
     .from('schedule')
@@ -2098,11 +2090,7 @@ function TicketForm({
    if(existing.data?.length){
     const updated=await sb.from('schedule').update(payload).eq('id',existing.data[0].id);
     if(updated.error) return updated.error;
-    if(existing.data.length>1){
-     const extras=existing.data.slice(1).map(x=>x.id);
-     const removed=await sb.from('schedule').delete().in('id',extras);
-     if(removed.error) return removed.error;
-    }
+    // Never delete other scheduled stops as a side effect of editing a ticket.
    }else{
     const inserted=await sb.from('schedule').insert(payload);
     if(inserted.error) return inserted.error;
@@ -2153,6 +2141,21 @@ function TicketForm({
    ()=>setNotice(''),
    2500
   );
+ }
+
+ async function permanentlyDeleteTicket(){
+  if(!form.id)return;
+  if(!confirm(`Permanently delete ticket #${form.ticket_number}? This cannot be undone. Related appointments and charges will be removed; inventory used on this ticket will be restored.`))return;
+  const typed=prompt('Type DELETE to permanently erase this ticket:');
+  if(typed!=='DELETE'){if(typed!==null)alert('Ticket was not deleted.');return;}
+  setSaving(true);setError('');
+  const result=await sb.rpc('jeffco_delete_ticket_v93',{p_ticket_id:form.id});
+  setSaving(false);
+  if(result.error){setError(`Delete failed: ${result.error.message}`);return;}
+  setTickets(prev=>prev.filter(t=>t.id!==form.id));
+  setModal(null);
+  setNotice(`Ticket #${form.ticket_number} permanently deleted`);
+  window.location.reload();
  }
 
  async function closeAndFileTicket(){
@@ -2314,6 +2317,12 @@ function TicketForm({
   );
  }
 
+ async function refreshInventoryCatalog(){
+  const result=await sb.from('parts_catalog').select('*').order('part_number');
+  if(result.error)setError(result.error.message);
+  else setPartsCatalog(result.data||[]);
+ }
+
  async function addCatalogPart(){
 
   if(!catalogPartId){
@@ -2347,13 +2356,14 @@ function TicketForm({
      part.description||'Part',
     quantity:1,
     unit_price:
-     Number(part.price||0)
+     Number(part.price||0),
+    inventory_part_id:part.id
    })
    .select()
    .single();
 
   if(r.error){
-   setError(r.error.message);
+   setError(`Cannot add saved part: ${r.error.message}`);
    return;
   }
 
@@ -2362,6 +2372,8 @@ function TicketForm({
   );
 
   setCatalogPartId('');
+  setCatalogSearch('');
+  await refreshInventoryCatalog();
  }
 
  async function addLabor(){
@@ -2402,7 +2414,10 @@ function TicketForm({
   id,
   changes
  ){
-
+  if(changes.quantity!==undefined){
+   const n=Number(changes.quantity);
+   if(!Number.isFinite(n)||n<0){setError('Quantity must be zero or greater.');return;}
+  }
   setParts(prev=>
    prev.map(p=>
     p.id===id
@@ -2418,7 +2433,9 @@ function TicketForm({
 
   if(r.error){
    setError(r.error.message);
+   await loadCharges();
   }
+  if(changes.quantity!==undefined)await refreshInventoryCatalog();
  }
 
   // Only explicitly opted-in ticket parts are saved to the catalog.
@@ -2519,6 +2536,7 @@ function TicketForm({
      p=>p.id!==id
     )
    );
+   await refreshInventoryCatalog();
 
   }
  }
@@ -2582,9 +2600,10 @@ function TicketForm({
    const equipmentLabel=[machine?.manufacturer,machine?.model].filter(Boolean).join(' ')||machine?.equipment_type||'Not specified';
    const partsRows=parts.map(p=>`<tr><td>${esc(p.part_number)}</td><td>${esc(p.description)}</td><td>${esc(p.quantity)}</td><td>${money(p.unit_price)}</td><td>${money(Number(p.quantity||0)*Number(p.unit_price||0))}</td></tr>`).join('');
    const laborRows=labor.map(l=>`<tr><td colspan="2">${esc(l.description)}</td><td>${esc(l.hours)}</td><td>${money(l.hourly_rate)}</td><td>${money(Number(l.hours||0)*Number(l.hourly_rate||0))}</td></tr>`).join('');
+   const tagHtml=`    <section class="equipment-tag"><div class="tag-cut">✂ CUT ALONG DASHED LINE</div><div class="tag-heading"><span>JEFFCO LAWN MOWER REPAIR</span><span>EQUIPMENT TAG</span></div><div class="tag-number">TICKET #${esc(form.ticket_number||'New')}</div><div class="tag-fields"><div><strong>Customer</strong>${esc(customer?.name||'Not specified')}</div><div><strong>Equipment / Brand</strong>${esc(equipmentLabel)}</div><div><strong>Model</strong>${esc(machine?.model||'Not specified')}</div><div><strong>Serial Number</strong>${esc(machine?.serial_number||'')}</div></div></section>`;
    const charges=isInvoice?`<h2>Parts &amp; Labor</h2><table><thead><tr><th>Part #</th><th>Description</th><th>Qty/Hrs</th><th>Rate</th><th>Total</th></tr></thead><tbody>${partsRows}${laborRows}</tbody></table>
     <div class="totals"><div><span>Parts</span><b>${money(partsSubtotal)}</b></div><div><span>Labor</span><b>${money(laborSubtotal)}</b></div><div><span>Pickup &amp; Delivery</span><b>${money(pickupDeliveryCost)}</b></div><div><span>Subtotal</span><b>${money(subtotal)}</b></div><div><span>Tax</span><b>${money(tax)}</b></div><div class="grand"><span>Total</span><b>${money(total)}</b></div></div>`:'';
-   const html=`<!doctype html><html><head><meta charset="utf-8"><title>JeffCo ${isInvoice?'Invoice':'Repair Ticket'} #${esc(form.ticket_number||'New')}</title>
+   const html=`<!doctype html><html><head><meta charset="utf-8"><title>JeffCo ${kind==='tag'?'Equipment Tag':isInvoice?'Invoice':'Repair Ticket'} #${esc(form.ticket_number||'New')}</title>
     <style>
      *{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;margin:0;padding:26px;color:#171717;font-size:12px;line-height:1.45}
      .masthead{display:flex;align-items:center;justify-content:center;background:#fff;color:#171717;padding:14px 18px;border-bottom:6px solid #8ac83f}
@@ -2599,6 +2618,8 @@ function TicketForm({
      .footer{clear:both;margin-top:35px;padding-top:10px;border-top:2px solid #8ac83f;text-align:center;font-size:11px;color:#444}
      body.ticket-print{position:relative;min-height:11in;padding-bottom:1.55in}
      .equipment-tag{position:absolute;bottom:0;left:0;margin:0;border-top:2px dashed #555;border-right:1px solid #aaa;border-bottom:1px solid #aaa;border-left:1px solid #aaa;height:1.25in;width:8.5in;max-width:100%;padding:6px 10px;break-inside:avoid;page-break-inside:avoid;display:flex;flex-direction:column;justify-content:space-between;background:#fff}
+     body.tag-print{padding:0;min-height:1.25in}
+     body.tag-print .equipment-tag{position:relative;bottom:auto;left:auto;width:8.5in;height:1.25in;max-width:none;margin:0}
      .tag-cut{font-size:8px;letter-spacing:1px;color:#555;margin-top:-5px;background:white;align-self:flex-start;padding:0 7px}
      .tag-heading{display:flex;justify-content:space-between;gap:8px;font-size:10px;font-weight:bold}
      .tag-number{font-size:21px;font-weight:800;line-height:1.1}
@@ -2606,10 +2627,10 @@ function TicketForm({
      .tag-fields strong{display:block;font-size:8px;text-transform:uppercase;color:#555}
      .invoice-copy{break-after:page;page-break-after:always}.invoice-copy:last-child{break-after:auto;page-break-after:auto}.copy-label{font-size:11px;font-weight:bold;text-align:right;margin:6px 0;color:#555}
      .printbar{margin:0 0 12px;text-align:right}.printbar button{background:#477c1c;color:white;border:0;border-radius:5px;padding:9px 15px;cursor:pointer}
-     @page{size:letter;margin:0}@media print{body.invoice-print{padding:12mm}body.ticket-print{position:relative;width:8.5in;min-height:11in;padding:12mm 12mm 1.55in;margin:0;display:block}.ticket-writing-space{display:none}.printbar{display:none}.masthead{-webkit-print-color-adjust:exact;print-color-adjust:exact}th{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
-    </style></head><body class="${isInvoice?'invoice-print':'ticket-print'}">
+     @page{size:letter;margin:0}@media print{body.tag-print{padding:0;min-height:1.25in}body.tag-print .equipment-tag{position:relative;bottom:auto;left:auto;width:8.5in;height:1.25in;max-width:none} body.invoice-print{padding:12mm}body.ticket-print{position:relative;width:8.5in;min-height:11in;padding:12mm 12mm 1.55in;margin:0;display:block}.ticket-writing-space{display:none}.printbar{display:none}.masthead{-webkit-print-color-adjust:exact;print-color-adjust:exact}th{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+    </style></head><body class="${kind==='tag'?'tag-print':isInvoice?'invoice-print':'ticket-print'}">
     <div class="printbar"><button onclick="window.print()">Print / Save PDF</button></div>
-    ${isInvoice?['MERCHANT COPY','CUSTOMER COPY'].map(copyLabel=>`<section class="invoice-copy">
+    ${kind==='tag'?tagHtml:isInvoice?['MERCHANT COPY','CUSTOMER COPY'].map(copyLabel=>`<section class="invoice-copy">
     <header class="masthead"><img class="logo" src="${JEFFCO_PRINT_LOGO}" alt="JeffCo Lawn Mower Repair logo"></header>
     ${isInvoice?`<div class="copy-label">${copyLabel}</div>`:''}
     <div class="docline"><h2>${isInvoice?'REPAIR INVOICE':'REPAIR TICKET'}</h2><div><strong>Ticket #${esc(form.ticket_number||'New')}</strong><div class="muted">Printed ${esc(new Date().toLocaleDateString())}</div></div></div>
@@ -3230,22 +3251,13 @@ function TicketForm({
        }
       />
 
-      <input
-       type="number"
-       step="1"
-       min="1"
-       placeholder="Qty"
+      <QuantityInput
        value={p.quantity}
+       min={0}
+       placeholder="Qty"
        disabled={form.archived}
-       onChange={e=>
-        updatePart(
-         p.id,
-         {
-          quantity:
-           e.target.value
-         }
-        )
-       }
+       commitOnBlur
+       onChange={value=>updatePart(p.id,{quantity:value})}
       />
 
       <input
@@ -3318,6 +3330,10 @@ function TicketForm({
      <div className="inlineform">
 
       <label>
+       Search Saved Parts
+       <input className="search" type="search" placeholder="Search part number or description…" value={catalogSearch} onChange={e=>setCatalogSearch(e.target.value)} />
+      </label>
+      <label>
        Add Saved Part
 
        <select
@@ -3332,7 +3348,7 @@ function TicketForm({
          Select a part…
         </option>
 
-        {partsCatalog.map(p=>
+        {partsCatalog.filter(p=>[p.part_number,p.description].some(v=>String(v||'').toLowerCase().includes(catalogSearch.trim().toLowerCase()))).map(p=>
          <option
           key={p.id}
           value={p.id}
@@ -3548,7 +3564,8 @@ function TicketForm({
 
    <section className="intakebox"><div className="sectionhead"><h3>Customer Communication</h3></div>{!form.archived&&<div className="rowactions">{['CALLED CUSTOMER','LEFT VOICEMAIL','ESTIMATE APPROVED','ESTIMATE DECLINED','CUSTOMER NOTIFIED READY'].map(type=><button className="small" key={type} onClick={()=>addCommunication(type)}>{type}</button>)}</div>}{(communications||[]).filter(x=>x.ticket_id===form.id).slice(0,8).map(x=><small key={x.id}>{new Date(x.created_at).toLocaleString()} · {x.communication_type}</small>)}</section>
 
-   <div className="rowactions"><button className="small" onClick={()=>printDocument('ticket')}>Print / Save Repair Ticket PDF</button><button className="small" onClick={()=>printDocument('invoice')}>Print / Save Invoice PDF</button></div>
+   <div className="rowactions"><button className="small" onClick={()=>printDocument('ticket')}>Print / Save Repair Ticket PDF</button><button className="small" onClick={()=>printDocument('tag')}>Print Equipment Tag Only</button><button className="small" onClick={()=>printDocument('invoice')}>Print / Save Invoice PDF</button></div>
+   {form.id&&<div style={{marginTop:22,paddingTop:12,borderTop:'1px solid #ddd'}}><button type="button" className="small danger" disabled={saving} onClick={permanentlyDeleteTicket}>Permanently Delete Ticket</button><small className="muted" style={{display:'block'}}>Irreversible. Requires typing DELETE.</small></div>}
 
    <Field
     l="Technician Notes"
@@ -3630,7 +3647,8 @@ function SuggestField({l,k,f,s,opts}){
 }
 
 function SchedulePage({schedule,customers,equipment,tickets,setError,setNotice,reload,editTicket}){
- const today=new Date().toISOString().slice(0,10);
+ const nowLocal=new Date();
+ const today=`${nowLocal.getFullYear()}-${String(nowLocal.getMonth()+1).padStart(2,'0')}-${String(nowLocal.getDate()).padStart(2,'0')}`;
  const [date,setDate]=useState(today),[type,setType]=useState('PICKUP'),[customerId,setCustomerId]=useState(''),[ticketId,setTicketId]=useState(''),[time,setTime]=useState(''),[notes,setNotes]=useState('');
  const [routeProgress,setRouteProgress]=useState(null);
  const [showNewCustomer,setShowNewCustomer]=useState(false);
@@ -3643,7 +3661,7 @@ function SchedulePage({schedule,customers,equipment,tickets,setError,setNotice,r
  const activeDay=day.filter(x=>x.status==='SCHEDULED');
  const pickups=activeDay.filter(x=>x.schedule_type==='PICKUP');
  const deliveries=activeDay.filter(x=>x.schedule_type==='DELIVERY');
- const upcoming=schedule.filter(x=>x.status==='SCHEDULED'&&x.scheduled_date>=today).sort((a,b)=>`${a.scheduled_date} ${a.scheduled_time||''}`.localeCompare(`${b.scheduled_date} ${b.scheduled_time||''}`));
+ const upcoming=schedule.filter(x=>x.status==='SCHEDULED').sort((a,b)=>`${a.scheduled_date} ${a.scheduled_time||''}`.localeCompare(`${b.scheduled_date} ${b.scheduled_time||''}`));
  const cname=id=>customers.find(x=>x.id===id)?.name||'Customer';
  const selectedCustomer=customers.find(x=>x.id===customerId);
  async function createScheduleCustomer(){
@@ -3761,15 +3779,31 @@ function SchedulePage({schedule,customers,equipment,tickets,setError,setNotice,r
   openAppleStop(next);
  }
  const waiting=tickets.filter(t=>!t.archived&&t.pickup_delivery_type==='PICKUP'&&t.transport_status==='WAITING_FOR_PICKUP');
- const stopRow=(x,keyPrefix='')=><div className="row" key={`${keyPrefix}${x.id}`}><div><b>{keyPrefix?`${x.scheduled_date} · `:''}{x.schedule_type} · {cname(x.customer_id)}</b><small>{x.scheduled_time||'No time'} · {[x.address,x.city].filter(Boolean).join(', ')||'No address'}</small><small>{x.status}{x.limit_override?' · LIMIT OVERRIDE':''}{x.notes?` · ${x.notes}`:''}</small></div><div className="rowactions">{x.ticket_id&&tickets.find(t=>t.id===x.ticket_id)&&<button className="small" onClick={()=>editTicket(tickets.find(t=>t.id===x.ticket_id))}>Edit Ticket</button>}<button className="small" onClick={()=>route(x)}>Navigate</button>{x.status==='SCHEDULED'&&<button className="small" onClick={()=>complete(x)}>{x.schedule_type==='PICKUP'?'Picked Up':'Delivered'}</button>}{x.status==='SCHEDULED'&&<button className="small danger" onClick={()=>deleteSchedule(x)}>Delete</button>}</div></div>;
+ const stopRow=(x,keyPrefix='')=><div className="row" key={`${keyPrefix}${x.id}`}><div><b>{keyPrefix?`${x.scheduled_date} · `:''}{x.schedule_type} · {cname(x.customer_id)}</b><small>{x.scheduled_time||'No time'} · {[x.address,x.city].filter(Boolean).join(', ')||'No address'}</small><small>{x.status==='SCHEDULED'&&x.scheduled_date<today?'OVERDUE · SCHEDULED':x.status}{x.limit_override?' · LIMIT OVERRIDE':''}{x.notes?` · ${x.notes}`:''}</small></div><div className="rowactions">{x.ticket_id&&tickets.find(t=>t.id===x.ticket_id)&&<button className="small" onClick={()=>editTicket(tickets.find(t=>t.id===x.ticket_id))}>Edit Ticket</button>}<button className="small" onClick={()=>route(x)}>Navigate</button>{x.status==='SCHEDULED'&&<button className="small" onClick={()=>complete(x)}>{x.schedule_type==='PICKUP'?'Picked Up':'Delivered'}</button>}{x.status==='SCHEDULED'&&<button className="small danger" onClick={()=>deleteSchedule(x)}>Delete</button>}</div></div>;
  return <>
   <div className="top"><div><h2>Schedule</h2><p className="muted">Pickups {pickups.length}/2 · Deliveries {deliveries.length}/2</p></div><button onClick={routeDay}>Start Apple Maps Route</button></div>
   {currentRouteIndex>=0&&<section className="panel"><b>Apple Maps Route — Stop {currentRouteIndex+1} of {routeStops.length}</b><p className="muted">{cname(routeStops[currentRouteIndex].customer_id)} · {routeStops[currentRouteIndex].schedule_type} · {[routeStops[currentRouteIndex].address,routeStops[currentRouteIndex].city].filter(Boolean).join(', ')}</p><div className="rowactions"><button className="small" onClick={()=>openAppleStop(routeStops[currentRouteIndex])}>Reopen Current Stop</button>{currentRouteIndex<routeStops.length-1?<button onClick={nextRouteStop}>Next Stop in Apple Maps</button>:<button onClick={()=>setRouteProgress(null)}>Finish Route</button>}</div><small>Apple Maps navigates to one destination at a time. Return here after each stop to continue.</small></section>}
   <section className="panel"><div className="form"><Field l="Date" k="date" f={{date}} s={x=>setDate(x.date)} type="date"/><label>Type<select value={type} onChange={e=>setType(e.target.value)}><option>PICKUP</option><option>DELIVERY</option></select></label><label>Customer<select value={customerId} onChange={e=>{setCustomerId(e.target.value);setTicketId('');}}><option value="">Select…</option>{customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><button type="button" className="small" onClick={()=>setShowNewCustomer(v=>!v)}>{showNewCustomer?'Cancel New Customer':'+ Add New Customer'}</button>{showNewCustomer&&<div className="panel"><h3>New Customer</h3><div className="form"><Field l="Name" k="name" f={newCustomer} s={setNewCustomer}/><Field l="Phone" k="phone" f={newCustomer} s={setNewCustomer}/><Field l="Address" k="address" f={newCustomer} s={setNewCustomer}/><Field l="City" k="city" f={newCustomer} s={setNewCustomer}/><Field l="Notes" k="notes" f={newCustomer} s={setNewCustomer} area/><button type="button" disabled={creatingCustomer} onClick={createScheduleCustomer}>{creatingCustomer?'Saving…':'Save New Customer'}</button></div></div>}<label>Ticket<select value={ticketId} onChange={e=>setTicketId(e.target.value)}><option value="">Optional…</option>{tickets.filter(t=>!t.archived&&(!customerId||t.customer_id===customerId)).map(t=><option key={t.id} value={t.id}>#{t.ticket_number}</option>)}</select></label>{type==='PICKUP'&&!ticketId&&<section className="panel"><h3>New Equipment & Repair Ticket</h3><small>All equipment and complaint fields are optional. Scheduling creates a Pending Pickup ticket automatically; fill in details later at the customer’s location. Choose an existing ticket above to avoid creating another.</small><div className="form"><Field l="Equipment Type" k="equipment_type" f={pickupEquipment} s={setPickupEquipment}/><SuggestField l="Manufacturer / Brand" k="manufacturer" f={pickupEquipment} s={setPickupEquipment} opts={[...new Set([...commonEquipmentBrands,...equipment.map(x=>x.manufacturer).filter(Boolean)])].sort()}/><Field l="Model" k="model" f={pickupEquipment} s={setPickupEquipment}/><Field l="Serial Number" k="serial_number" f={pickupEquipment} s={setPickupEquipment}/><SuggestField l="Engine" k="engine" f={pickupEquipment} s={setPickupEquipment} opts={[...new Set([...commonEngineBrands,...equipment.map(x=>x.engine).filter(Boolean)])].sort()}/><Field l="Engine Model" k="engine_model" f={pickupEquipment} s={setPickupEquipment}/><Field l="Equipment Notes" k="notes" f={pickupEquipment} s={setPickupEquipment} area/><label>Customer Complaint<textarea value={pickupIssue} onChange={e=>setPickupIssue(e.target.value)}/></label></div></section>}<Field l="Time" k="time" f={{time}} s={x=>setTime(x.time)} type="time"/><Field l="Notes" k="notes" f={{notes}} s={x=>setNotes(x.notes)} area/><button onClick={add} disabled={creatingStop}>{creatingStop?'Saving…':'Add to Schedule'}</button></div></section>
   <section className="panel"><h3>{date} — Scheduled Stops</h3>{!day.length&&<div className="empty">Nothing scheduled.</div>}{day.map(x=>stopRow(x))}</section>
-  <section className="panel"><h3>All Upcoming Pickups and Deliveries</h3>{!upcoming.length&&<div className="empty">No upcoming pickups or deliveries.</div>}{upcoming.map(x=>stopRow(x,'upcoming-'))}</section>
+  <section className="panel"><h3>All Outstanding Pickups and Deliveries (Including Overdue)</h3>{!upcoming.length&&<div className="empty">No outstanding pickups or deliveries.</div>}{upcoming.map(x=>stopRow(x,'upcoming-'))}</section>
   {waiting.length>0&&<section className="panel"><h3>Waiting for Pickup</h3>{waiting.map(t=><div className="row" key={t.id}><div><b>Ticket #{t.ticket_number} · {cname(t.customer_id)}</b><small>Not yet picked up</small></div><div className="rowactions"><button className="small" onClick={()=>editTicket(t)}>Edit Ticket</button></div></div>)}</section>}
  </>;
+}
+
+function QuantityInput({value,onChange,disabled=false,min=0,placeholder='',commitOnBlur=false}){
+ const [draft,setDraft]=useState(String(value??''));
+ useEffect(()=>setDraft(String(value??'')),[value]);
+ const current=Number(commitOnBlur?draft:value||0);
+ const commit=v=>{
+  if(v===''||!Number.isFinite(Number(v))||Number(v)<min){setDraft(String(value??''));return;}
+  setDraft(String(v));onChange(String(v));
+ };
+ const adjust=delta=>commit(Math.max(min,Math.round((current+delta)*1000000)/1000000));
+ return <div style={{display:'flex',alignItems:'center',gap:4,minWidth:125}}>
+  <button type="button" className="small" disabled={disabled||current<=min} onClick={()=>adjust(-1)} aria-label="Decrease quantity by one">−</button>
+  <input type="number" step="any" min={min} placeholder={placeholder} value={commitOnBlur?draft:value??''} disabled={disabled} onChange={e=>commitOnBlur?setDraft(e.target.value):onChange(e.target.value)} onBlur={()=>{if(commitOnBlur)commit(draft);}} style={{minWidth:0,width:80}} />
+  <button type="button" className="small" disabled={disabled} onClick={()=>adjust(1)} aria-label="Increase quantity by one">+</button>
+ </div>;
 }
 
 function Field({
@@ -3797,6 +3831,8 @@ function Field({
       }
      />
 
+   : (type==='number'&&['quantity_on_hand','low_stock_level','quantity'].includes(k))
+    ? <QuantityInput value={f[k]} onChange={v=>s({...f,[k]:v})}/>
    : <input
       type={type}
       step={
