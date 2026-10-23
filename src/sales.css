@@ -1,0 +1,12 @@
+.sales-v94 .sales-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
+.sales-v94 .sales-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:14px 0}
+.sales-v94 label{display:block;font-weight:700;font-size:13px}
+.sales-v94 label input:not([type=checkbox]),.sales-v94 label select{display:block;width:100%;border:1px solid #cbd5e1;border-radius:8px;padding:10px;margin-top:5px;background:white;color:#111827}
+.sales-v94 .sales-item{display:grid;grid-template-columns:1.6fr 1fr 1.5fr 75px 110px auto;gap:8px;align-items:end;padding:12px 0;border-bottom:1px solid #e5e7eb}
+.sales-v94 .sales-override{display:flex;align-items:center;gap:8px;margin:16px 0;font-weight:400}
+.sales-v94 .sales-total{background:#f3f4f6;padding:16px;border-radius:10px;margin:16px 0;display:flex;gap:14px;flex-wrap:wrap;justify-content:flex-end}
+.sales-v94 .sales-total strong{font-size:20px}
+.sales-v94 .sales-detail{border:1px solid #d1d5db;border-radius:10px;padding:15px;margin-top:16px}
+.sales-v94 pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px}
+@media(max-width:900px){.sales-v94 .sales-item{grid-template-columns:repeat(2,minmax(0,1fr))}.sales-v94 .sales-item label:first-child,.sales-v94 .sales-item label:nth-child(3){grid-column:1/-1}}
+@media(max-width:480px){.sales-v94 .sales-item{grid-template-columns:1fr 1fr}.sales-v94 .sales-item label:nth-child(2){grid-column:1/-1}}

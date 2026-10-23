@@ -2,6 +2,7 @@ import React,{useEffect,useState,useRef} from 'react';
 import {createRoot} from 'react-dom/client';
 import {createClient} from '@supabase/supabase-js';
 import './style.css';
+import SalesReceipts from './SalesReceipts.jsx';
 
 const sb=createClient(
  import.meta.env.VITE_SUPABASE_URL,
@@ -453,6 +454,7 @@ function App(){
     'Parts',
     'Tickets',
     'Schedule',
+    'Sales & Receipts',
     'Filed Tickets'
    ].map(x=>
 
@@ -901,6 +903,10 @@ function App(){
       </section>
 
      </>}
+
+     {tab==='Sales & Receipts'&&
+      <SalesReceipts logo={JEFFCO_PRINT_LOGO}/>
+     }
 
      {tab==='Schedule'&&
       <SchedulePage
